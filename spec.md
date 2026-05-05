@@ -131,7 +131,7 @@ Intake is intentionally dumb — fast, cheap, reliable. No classification, no Cl
 
 ## Processing (per item, in batch)
 
-Triggered by cron at 6:30 / 12:00 / 21:00, plus `/process` on demand.
+Triggered by cron at 6:30 / 12:00 / 21:00, plus `/process` on demand. The `/process` command runs an off-cycle batch immediately — its primary purpose is letting you make recent captures findable via `/find` before the next scheduled batch fires. Whenever README or CLAUDE.md is written for this repo, this off-cycle escape-hatch role of `/process` must be documented explicitly.
 
 For each `status=pending` item:
 
