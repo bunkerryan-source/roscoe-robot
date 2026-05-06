@@ -1,0 +1,20 @@
+[Unit]
+Description=Personal OS bot v2 (capture pipe → Supabase + Dropbox)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/personal-os-v2
+EnvironmentFile=/opt/personal-os-v2/.env
+ExecStart=/opt/personal-os-v2/venv/bin/uvicorn bot.main:app \
+    --host 0.0.0.0 \
+    --port 8443 \
+    --ssl-keyfile /opt/personal-os/ssl.key \
+    --ssl-certfile /opt/personal-os/ssl.crt
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
