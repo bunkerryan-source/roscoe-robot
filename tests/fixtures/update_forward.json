@@ -1,0 +1,15 @@
+{
+    "update_id": 1007,
+    "message": {
+        "message_id": 106,
+        "from": {"id": 12345, "is_bot": false, "first_name": "Ryan"},
+        "chat": {"id": 12345, "type": "private"},
+        "date": 1746472260,
+        "forward_origin": {
+            "type": "user",
+            "date": 1746470000,
+            "sender_user": {"id": 999, "is_bot": false, "first_name": "Friend"}
+        },
+        "text": "Forwarded important article: https://example.com/article"
+    }
+}

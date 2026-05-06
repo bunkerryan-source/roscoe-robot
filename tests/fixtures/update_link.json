@@ -1,0 +1,11 @@
+{
+    "update_id": 1002,
+    "message": {
+        "message_id": 101,
+        "from": {"id": 12345, "is_bot": false, "first_name": "Ryan"},
+        "chat": {"id": 12345, "type": "private"},
+        "date": 1746472210,
+        "text": "https://x.com/somebody/status/123",
+        "entities": [{"type": "url", "offset": 0, "length": 35}]
+    }
+}

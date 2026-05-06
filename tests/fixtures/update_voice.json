@@ -1,0 +1,16 @@
+{
+    "update_id": 1006,
+    "message": {
+        "message_id": 105,
+        "from": {"id": 12345, "is_bot": false, "first_name": "Ryan"},
+        "chat": {"id": 12345, "type": "private"},
+        "date": 1746472250,
+        "voice": {
+            "file_id": "voice_file_id",
+            "file_unique_id": "vc1",
+            "duration": 8,
+            "mime_type": "audio/ogg",
+            "file_size": 30000
+        }
+    }
+}

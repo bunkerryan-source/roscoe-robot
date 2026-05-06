@@ -1,0 +1,10 @@
+{
+    "update_id": 1008,
+    "message": {
+        "message_id": 107,
+        "from": {"id": 99999, "is_bot": false, "first_name": "Stranger"},
+        "chat": {"id": 99999, "type": "private"},
+        "date": 1746472270,
+        "text": "spam attempt"
+    }
+}
