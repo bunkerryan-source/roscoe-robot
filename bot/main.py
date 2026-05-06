@@ -2,7 +2,12 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+
+# Load .env for local dev. On the droplet, systemd's EnvironmentFile= already
+# populates the environment, and load_dotenv() does not override existing vars.
+load_dotenv()
 
 from bot.config import Config
 from bot.db import get_client, insert_item, update_media_path
