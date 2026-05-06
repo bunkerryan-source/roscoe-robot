@@ -12,7 +12,7 @@
 
 ## Spec reference
 
-This plan implements the **Capture (bot intake)**, **Data model**, and **Failure modes** sections of [spec.md](../../../spec.md), constrained to what Session 2 delivers per the **Build sequence** section. No processing, no classification, no Claude calls in this session.
+This plan implements the **Capture (bot intake)**, **Data model**, and **Failure modes** sections of [the design spec](../specs/2026-05-05-personal-os-design.md), constrained to what Session 2 delivers per the **Build sequence** section. No processing, no classification, no Claude calls in this session.
 
 ## Prerequisites (one-time setup the operator does before starting Task 1)
 
