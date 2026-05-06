@@ -1,0 +1,20 @@
+[project]
+name = "roscoe-robot"
+version = "0.2.0"
+description = "Personal OS capture bot"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "pytest-mock==3.14.0",
+    "respx==0.21.1",
+]
+
+[tool.setuptools]
+packages = ["bot"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
