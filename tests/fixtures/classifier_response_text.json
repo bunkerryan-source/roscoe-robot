@@ -1,0 +1,19 @@
+{
+  "id": "msg_test_text_01",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5-20251001",
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"project\":\"claude-build\",\"subdomain\":null,\"type\":\"idea\",\"tags\":[\"ai\",\"mcp\"],\"visual_subtype\":null,\"summary\":\"Idea: build an MCP server for Todoist that supports parent-task auto-grouping.\",\"confidence\":0.88}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 480,
+    "output_tokens": 120,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 4800
+  }
+}

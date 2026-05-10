@@ -1,0 +1,19 @@
+{
+  "id": "msg_test_design_01",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5-20251001",
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"project\":\"design\",\"subdomain\":null,\"type\":\"image\",\"tags\":[\"hero\",\"dark-mode\",\"gradient\"],\"visual_subtype\":\"hero\",\"summary\":\"Hero section with dark gradient background and oversized serif headline.\",\"confidence\":0.93}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 520,
+    "output_tokens": 95,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 4800
+  }
+}
