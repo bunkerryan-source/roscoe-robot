@@ -18,7 +18,7 @@ class Config:
     anthropic_api_key: str
     openai_api_key: str
     todoist_api_token: str
-    todoist_parents: dict[str, str]
+    todoist_projects: dict[str, str]
     obsidian_vault_dropbox_path: str
 
     @classmethod
@@ -28,10 +28,10 @@ class Config:
             "SUPABASE_URL", "SUPABASE_SERVICE_KEY",
             "DROPBOX_APP_KEY", "DROPBOX_APP_SECRET", "DROPBOX_REFRESH_TOKEN",
             "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "TODOIST_API_TOKEN",
-            "TODOIST_PARENT_ACUTE", "TODOIST_PARENT_ABP",
-            "TODOIST_PARENT_LAKE_ARROWHEAD", "TODOIST_PARENT_CHURCH",
-            "TODOIST_PARENT_CLAUDE_BUILD", "TODOIST_PARENT_DESIGN",
-            "TODOIST_PARENT_PERSONAL",
+            "TODOIST_PROJECT_ACUTE", "TODOIST_PROJECT_ABP",
+            "TODOIST_PROJECT_LAKE_ARROWHEAD", "TODOIST_PROJECT_CHURCH",
+            "TODOIST_PROJECT_CLAUDE_BUILD", "TODOIST_PROJECT_DESIGN",
+            "TODOIST_PROJECT_PERSONAL",
             "OBSIDIAN_VAULT_DROPBOX_PATH",
         ]
         missing = [k for k in required if not os.environ.get(k, "").strip()]
@@ -55,14 +55,14 @@ class Config:
             anthropic_api_key=os.environ["ANTHROPIC_API_KEY"],
             openai_api_key=os.environ["OPENAI_API_KEY"],
             todoist_api_token=os.environ["TODOIST_API_TOKEN"],
-            todoist_parents={
-                "acute": os.environ["TODOIST_PARENT_ACUTE"],
-                "abp": os.environ["TODOIST_PARENT_ABP"],
-                "lake-arrowhead": os.environ["TODOIST_PARENT_LAKE_ARROWHEAD"],
-                "church": os.environ["TODOIST_PARENT_CHURCH"],
-                "claude-build": os.environ["TODOIST_PARENT_CLAUDE_BUILD"],
-                "design": os.environ["TODOIST_PARENT_DESIGN"],
-                "personal": os.environ["TODOIST_PARENT_PERSONAL"],
+            todoist_projects={
+                "acute": os.environ["TODOIST_PROJECT_ACUTE"],
+                "abp": os.environ["TODOIST_PROJECT_ABP"],
+                "lake-arrowhead": os.environ["TODOIST_PROJECT_LAKE_ARROWHEAD"],
+                "church": os.environ["TODOIST_PROJECT_CHURCH"],
+                "claude-build": os.environ["TODOIST_PROJECT_CLAUDE_BUILD"],
+                "design": os.environ["TODOIST_PROJECT_DESIGN"],
+                "personal": os.environ["TODOIST_PROJECT_PERSONAL"],
             },
             obsidian_vault_dropbox_path=os.environ["OBSIDIAN_VAULT_DROPBOX_PATH"],
         )

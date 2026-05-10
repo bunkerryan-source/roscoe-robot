@@ -47,7 +47,7 @@ These resolve the spec's "Open items" plus a few new ones surfaced by Session 2'
 | YouTube transcripts | `youtube-transcript-api` (free, scrapes public captions) | No API key needed |
 | OG metadata | Hand-rolled httpx fetcher + `<meta>` regex | Avoids an extra dep; OG parsing is ~30 lines |
 | Todoist auth | Personal API token (Settings → Integrations → API token) | Single-user system; OAuth overkill |
-| Todoist project structure | Existing `#[Project]` parent tasks already in user's Todoist (`#Acute`, `#ABP`, etc.) | Per spec; user creates any missing parents during prereqs |
+| Todoist project structure | Existing Todoist **projects** (`#Acute`, `#ABP`, etc.) — classified todos land as top-level tasks in the matching project | User already organizes Todoist by project, not by parent-task hierarchy. We pass `project_id` to the REST API. |
 | `/process` mechanism | Bot schedules a FastAPI background task that runs `bot.processor.run_batch()` in-process | Same droplet, same systemd service, no new infra |
 | Telegram reply format | One-line summary on completion: `"processed N items in Xs · $0.YZ · M needs review"` | Detailed B+ format is Session 4 |
 | Vision skip threshold | Caption length > 8 chars AND matches a known project keyword | Per spec, exact rule |

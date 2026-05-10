@@ -148,7 +148,7 @@ async def _run_batch_and_reply(chat_id: int, reply_to: int) -> None:
             dropbox_client_factory=dropbox_factory.get_client,
             openai_api_key=config.openai_api_key,
             todoist_token=config.todoist_api_token,
-            todoist_parents=config.todoist_parents,
+            todoist_projects=config.todoist_projects,
             vault_root=config.obsidian_vault_dropbox_path,
             rules_md=RULES_MD,
             tag_vocab_md=TAG_VOCAB_MD,

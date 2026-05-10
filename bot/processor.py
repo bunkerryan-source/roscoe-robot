@@ -132,7 +132,7 @@ def process_item(
     dropbox_client,
     openai_api_key: str,
     todoist_token: str,
-    todoist_parents: dict,
+    todoist_projects: dict,
     vault_root: str,
     system_blocks: list[dict],
 ) -> dict:
@@ -189,12 +189,12 @@ def process_item(
 
         if classification.get("type") == "todo":
             project = classification.get("project") or "personal"
-            parent_id = todoist_parents.get(project)
-            if parent_id:
+            project_id = todoist_projects.get(project)
+            if project_id:
                 try:
                     out["todoist_task_id"] = create_todoist_task(
                         api_token=todoist_token,
-                        parent_task_id=parent_id,
+                        project_id=project_id,
                         content=classification.get("summary") or item.get("raw_text") or "(no content)",
                         description=item.get("raw_text") if classification.get("summary") else None,
                     )
@@ -219,7 +219,7 @@ def run_batch(
     dropbox_client_factory,
     openai_api_key: str,
     todoist_token: str,
-    todoist_parents: dict,
+    todoist_projects: dict,
     vault_root: str,
     rules_md: str,
     tag_vocab_md: str,
@@ -243,7 +243,7 @@ def run_batch(
             dropbox_client=dropbox_client,
             openai_api_key=openai_api_key,
             todoist_token=todoist_token,
-            todoist_parents=todoist_parents,
+            todoist_projects=todoist_projects,
             vault_root=vault_root,
             system_blocks=system_blocks,
         )

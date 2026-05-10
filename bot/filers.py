@@ -80,13 +80,13 @@ def write_obsidian_note(
 
 def create_todoist_task(
     api_token: str,
-    parent_task_id: str,
+    project_id: str,
     content: str,
     *,
     description: str | None = None,
 ) -> str:
-    """POST a new Todoist task under the given parent. Returns the new task ID."""
-    body: dict = {"content": content, "parent_id": parent_task_id}
+    """POST a new top-level Todoist task in the given project. Returns the new task ID."""
+    body: dict = {"content": content, "project_id": project_id}
     if description:
         body["description"] = description
 

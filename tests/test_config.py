@@ -32,8 +32,8 @@ def test_config_loads_new_session_3_fields(env):
     assert cfg.anthropic_api_key == "test_anthropic_key"
     assert cfg.openai_api_key == "test_openai_key"
     assert cfg.todoist_api_token == "test_todoist_token"
-    assert cfg.todoist_parents["acute"] == "1000001"
-    assert cfg.todoist_parents["personal"] == "1000007"
+    assert cfg.todoist_projects["acute"] == "1000001"
+    assert cfg.todoist_projects["personal"] == "1000007"
     assert cfg.obsidian_vault_dropbox_path == "/personal-os"
 
 

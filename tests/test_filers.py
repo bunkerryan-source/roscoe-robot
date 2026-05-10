@@ -107,7 +107,7 @@ def test_create_todoist_task_posts_to_correct_endpoint():
 
     task_id = create_todoist_task(
         api_token="test-token",
-        parent_task_id="1000001",
+        project_id="1000001",
         content="Follow up with Walmart contact",
     )
 
@@ -117,7 +117,7 @@ def test_create_todoist_task_posts_to_correct_endpoint():
     assert request.headers["Authorization"] == "Bearer test-token"
     body = json.loads(request.content)
     assert body["content"] == "Follow up with Walmart contact"
-    assert body["parent_id"] == "1000001"
+    assert body["project_id"] == "1000001"
 
 
 @respx.mock
@@ -128,7 +128,7 @@ def test_create_todoist_task_includes_description_when_provided():
 
     create_todoist_task(
         api_token="t",
-        parent_task_id="100",
+        project_id="100",
         content="Call vendor",
         description="See raw capture for context",
     )
@@ -144,7 +144,7 @@ def test_create_todoist_task_raises_on_http_error():
     )
 
     with pytest.raises(RuntimeError, match="Todoist"):
-        create_todoist_task(api_token="t", parent_task_id="1", content="x")
+        create_todoist_task(api_token="t", project_id="1", content="x")
 
 
 def test_move_dropbox_media_calls_files_move_v2():
