@@ -1,0 +1,5 @@
+[
+  {"text": "Hi everyone, today we're going to look at MCP servers.", "start": 0.0, "duration": 4.5},
+  {"text": "MCP stands for Model Context Protocol.", "start": 4.5, "duration": 3.2},
+  {"text": "It's the new standard from Anthropic for connecting tools to LLMs.", "start": 7.7, "duration": 5.0}
+]
