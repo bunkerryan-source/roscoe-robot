@@ -19,7 +19,7 @@ Don't duplicate the spec here; just pointer.
 **Now: validation week.** Ryan runs `/process` daily on real captures. Each misclassification gets logged as a rule in `_meta/rules.md`. Goal is to gather correction data from real use before Session 4 begins. **Do not start Session 4 work without explicit instruction.**
 
 **Next sessions (per spec):**
-- **Session 4** — Daily summary at 6:30/21:00 + B+ triage UI (inline keyboard), corrections table.
+- **Session 4** — Daily summary at 6:30/21:00 + B+ triage UI (inline keyboard), corrections table, vision wiring for image items, **Apify X scraper** in the enrichment layer (replaces failed OG fetch on `x.com`/`twitter.com` URLs; pulls full text + images + author). Adds `APIFY_API_TOKEN` to `.env`.
 - **Session 5** — Autonomy: cron on droplet, 12:00 PM silent run, daily cost cap.
 - **Session 6** — Weekly digest (Sonnet 4.6), monthly rule consolidation pass, research-thread clustering.
 - **Session 7** — `/find` polish, OA-wiki feeders, multi-source ingest.
@@ -66,6 +66,7 @@ ssh root@64.23.170.115 'journalctl -u personal-os-v2 -n 50 --no-pager'   # check
 ## Things that are NOT done yet
 
 - **Vision (image classification).** Image-only items currently get `needs_review` because the classifier can't see them. Wired in Session 4.
+- **X / Twitter scraping.** OG fetch on `x.com` URLs returns nothing because Twitter blocks unauthenticated scrapers. X URLs without user-typed context land in `needs_review`. Apify scraper added in Session 4 will close this gap. Until then, capture habit is: paste tweet text or screenshot the image with a descriptive caption (see operator runbook).
 - **Voice transcription on droplet.** Code path is built (`transcribe_voice` in `bot/enrichment.py`) but unverified end-to-end on droplet — no real voice memo has been processed yet.
 - **Cron / autonomy.** `/process` is manual only. Session 5 adds the 12:00 PM silent run and daily cost cap.
 - **`/find` retrieval.** No retrieval surface yet beyond Obsidian native search and Supabase queries. Session 7.

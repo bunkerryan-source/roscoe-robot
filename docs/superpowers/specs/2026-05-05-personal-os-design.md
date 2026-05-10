@@ -290,7 +290,7 @@ Refines the handoff doc's Sessions 2-5 with what we now know.
 
 **Session 3 — Processing skill, manually triggered.** Build the classifier prompt, seed `_meta/rules.md` and the tag vocab, build enrichment functions (YouTube transcript, OG fetch, Whisper), build filers (Obsidian writer, Todoist creator, Dropbox mover). `/process` Telegram command runs a one-shot batch from Claude Code. Validate accuracy on real data for one full week. **Refine taxonomy from real captures, not from theory.**
 
-**Session 4 — Daily summary + B+ triage flow.** Bot sends formatted summary at 6:30 / 21:00. Inline-keyboard handlers for `[Review items]`, refile dialog, corrections write to `corrections` table.
+**Session 4 — Daily summary + B+ triage flow + vision + Apify X scraper.** Bot sends formatted summary at 6:30 / 21:00. Inline-keyboard handlers for `[Review items]`, refile dialog, corrections write to `corrections` table. Wire vision call into the processor for image items (with caption-decisive skip per processing rules above). Add Apify X scraper to the enrichment layer — replaces the failed OG fetch on `x.com` / `twitter.com` URLs, pulls full tweet text, images, and author. Falls back to bare-URL behavior on scraper failure (item lands in `needs_review`). Apify cost: pay-per-result actor, ~$0.30–$1.00 per 1k tweets; expected <$0.50/month at projected volume.
 
 **Session 5 — Autonomy.** Cron on droplet calls Anthropic API directly with the `process-inbox` skill content embedded as the system prompt. 12:00 PM silent run. Daily cost cap + cost tracking enforced.
 
