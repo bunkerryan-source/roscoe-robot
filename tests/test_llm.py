@@ -214,3 +214,52 @@ def test_classify_item_raises_on_non_json_response():
 
     with pytest.raises(ValueError, match="not valid JSON"):
         classify_item(fake_client, [{"type": "text", "text": "s"}], "x")
+
+
+def _fake_message_with_text(text: str):
+    msg = MagicMock()
+    msg.content = [MagicMock(type="text", text=text)]
+    msg.usage = MagicMock(
+        input_tokens=10, output_tokens=10,
+        cache_creation_input_tokens=0, cache_read_input_tokens=0,
+    )
+    return msg
+
+
+def test_classify_item_strips_json_markdown_fences():
+    fenced = (
+        "```json\n"
+        '{"project":"design","subdomain":null,"type":"image","tags":["hero"],'
+        '"visual_subtype":"hero","summary":"Hero","confidence":0.9}\n'
+        "```"
+    )
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = _fake_message_with_text(fenced)
+
+    result = classify_item(fake_client, [{"type": "text", "text": "s"}], "x")
+    assert result["project"] == "design"
+    assert result["confidence"] == 0.9
+
+
+def test_classify_item_strips_unlabeled_fences():
+    fenced = '```\n{"project":"personal","subdomain":null,"type":"idea","tags":[],"visual_subtype":null,"summary":"x","confidence":0.5}\n```'
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = _fake_message_with_text(fenced)
+
+    result = classify_item(fake_client, [{"type": "text", "text": "s"}], "x")
+    assert result["project"] == "personal"
+
+
+def test_classify_item_extracts_object_from_prose_with_json():
+    prose = (
+        "Sure! Here's the classification:\n\n"
+        '{"project":"acute","subdomain":null,"type":"todo","tags":["prospecting"],'
+        '"visual_subtype":null,"summary":"Walmart follow-up.","confidence":0.92}\n\n'
+        "Let me know if you need anything else."
+    )
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = _fake_message_with_text(prose)
+
+    result = classify_item(fake_client, [{"type": "text", "text": "s"}], "x")
+    assert result["project"] == "acute"
+    assert result["type"] == "todo"

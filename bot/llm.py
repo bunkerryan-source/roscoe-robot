@@ -10,6 +10,27 @@ This module is the only one that imports `anthropic`. It exposes:
 """
 import json
 import math
+import re
+
+
+# Strips a leading ```json or ``` and a trailing ```. Models sometimes wrap
+# JSON in markdown fences despite being told not to.
+_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
+# Last-ditch fallback: extract the first `{...}` object from arbitrary text.
+_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _extract_json(raw: str) -> str:
+    """Return a string the json parser can consume. Tries: raw, fence-stripped,
+    first {...} object. Caller still decides whether the result parses."""
+    s = raw.strip()
+    m = _FENCE_RE.match(s)
+    if m:
+        return m.group(1).strip()
+    m = _OBJECT_RE.search(s)
+    if m:
+        return m.group(0).strip()
+    return s
 
 
 # Haiku 4.5 prices in USD per 1M tokens.
@@ -140,8 +161,9 @@ def classify_item(
     text_blocks = [b.text for b in response.content if b.type == "text"]
     raw = "".join(text_blocks).strip()
 
+    candidate = _extract_json(raw)
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(candidate)
     except json.JSONDecodeError as e:
         raise ValueError(f"classifier response is not valid JSON: {raw[:200]}") from e
 
