@@ -155,6 +155,12 @@ def process_item(
         # Note: vision-call wiring is deferred to Session 4. For now we send
         # text-only and rely on the caption.
 
+        if not payload.strip():
+            payload = (
+                f"[{item.get('media_type', 'unknown')} item with no caption "
+                f"or transcript — classify as best-guess from media_type]"
+            )
+
         classification = classify_item(anthropic_client, system_blocks, payload)
         out["classification"] = classification
         out["api_cost_cents"] = classification.get("_cost_cents", 0)

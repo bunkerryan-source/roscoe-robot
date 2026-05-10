@@ -8,6 +8,7 @@ from datetime import date as _date
 from datetime import datetime, timezone
 
 import httpx
+from dropbox.files import WriteMode
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -73,7 +74,7 @@ def write_obsidian_note(
     note = "\n".join(body_parts).encode("utf-8")
 
     full_path = f"{vault_root}/{obsidian_path}"
-    dropbox_client.files_upload(f=note, path=full_path, mode="overwrite")
+    dropbox_client.files_upload(f=note, path=full_path, mode=WriteMode("overwrite"))
 
     return obsidian_path
 
