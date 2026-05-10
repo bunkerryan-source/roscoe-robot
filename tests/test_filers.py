@@ -99,10 +99,22 @@ def test_obsidian_note_writes_to_correct_dropbox_path():
     assert full_path == f"/personal-os/{obsidian_path}"
 
 
+def _todoist_ok_handler(task_id: str):
+    """Build a respx side_effect that echoes back the request's temp_id/uuid as success."""
+    def handler(request):
+        body = json.loads(request.content)
+        cmd = body["commands"][0]
+        return Response(200, json={
+            "sync_status": {cmd["uuid"]: "ok"},
+            "temp_id_mapping": {cmd["temp_id"]: task_id},
+        })
+    return handler
+
+
 @respx.mock
 def test_create_todoist_task_posts_to_correct_endpoint():
-    respx.post("https://api.todoist.com/rest/v2/tasks").mock(
-        return_value=Response(200, json={"id": "8888888888"})
+    respx.post("https://api.todoist.com/api/v1/sync").mock(
+        side_effect=_todoist_ok_handler("8888888888")
     )
 
     task_id = create_todoist_task(
@@ -116,14 +128,16 @@ def test_create_todoist_task_posts_to_correct_endpoint():
     request = respx.calls.last.request
     assert request.headers["Authorization"] == "Bearer test-token"
     body = json.loads(request.content)
-    assert body["content"] == "Follow up with Walmart contact"
-    assert body["project_id"] == "1000001"
+    cmd = body["commands"][0]
+    assert cmd["type"] == "item_add"
+    assert cmd["args"]["content"] == "Follow up with Walmart contact"
+    assert cmd["args"]["project_id"] == "1000001"
 
 
 @respx.mock
 def test_create_todoist_task_includes_description_when_provided():
-    respx.post("https://api.todoist.com/rest/v2/tasks").mock(
-        return_value=Response(200, json={"id": "9999999999"})
+    respx.post("https://api.todoist.com/api/v1/sync").mock(
+        side_effect=_todoist_ok_handler("9999999999")
     )
 
     create_todoist_task(
@@ -134,17 +148,34 @@ def test_create_todoist_task_includes_description_when_provided():
     )
 
     body = json.loads(respx.calls.last.request.content)
-    assert body["description"] == "See raw capture for context"
+    assert body["commands"][0]["args"]["description"] == "See raw capture for context"
 
 
 @respx.mock
 def test_create_todoist_task_raises_on_http_error():
-    respx.post("https://api.todoist.com/rest/v2/tasks").mock(
+    respx.post("https://api.todoist.com/api/v1/sync").mock(
         return_value=Response(500, text="server error")
     )
 
     with pytest.raises(RuntimeError, match="Todoist"):
         create_todoist_task(api_token="t", project_id="1", content="x")
+
+
+@respx.mock
+def test_create_todoist_task_raises_when_command_rejected():
+    """Todoist returns 200 OK at the HTTP level but the per-command status
+    can be an error object (e.g., project not found)."""
+    def handler(request):
+        body = json.loads(request.content)
+        cmd = body["commands"][0]
+        return Response(200, json={
+            "sync_status": {cmd["uuid"]: {"error_code": 22, "error": "Project not found"}},
+            "temp_id_mapping": {},
+        })
+    respx.post("https://api.todoist.com/api/v1/sync").mock(side_effect=handler)
+
+    with pytest.raises(RuntimeError, match="rejected"):
+        create_todoist_task(api_token="t", project_id="bogus", content="x")
 
 
 def test_move_dropbox_media_calls_files_move_v2():

@@ -4,6 +4,7 @@ Pure-Python; no FastAPI imports. Each function takes already-built clients/
 tokens so the caller (processor) can wire them up once.
 """
 import re
+import uuid
 from datetime import date as _date
 from datetime import datetime, timezone
 
@@ -86,13 +87,25 @@ def create_todoist_task(
     *,
     description: str | None = None,
 ) -> str:
-    """POST a new top-level Todoist task in the given project. Returns the new task ID."""
-    body: dict = {"content": content, "project_id": project_id}
+    """POST a new top-level Todoist task in the given project. Returns the new task ID.
+
+    Uses Todoist's unified API v1 sync endpoint. The legacy REST v2 endpoint
+    (/rest/v2/tasks) was deprecated and now returns 410 Gone.
+    """
+    temp_id = str(uuid.uuid4())
+    cmd_uuid = str(uuid.uuid4())
+    args: dict = {"content": content, "project_id": project_id}
     if description:
-        body["description"] = description
+        args["description"] = description
+
+    body = {
+        "commands": [
+            {"type": "item_add", "temp_id": temp_id, "uuid": cmd_uuid, "args": args}
+        ]
+    }
 
     response = httpx.post(
-        "https://api.todoist.com/rest/v2/tasks",
+        "https://api.todoist.com/api/v1/sync",
         headers={"Authorization": f"Bearer {api_token}"},
         json=body,
         timeout=10.0,
@@ -100,7 +113,15 @@ def create_todoist_task(
     if response.status_code >= 400:
         raise RuntimeError(f"Todoist API failed ({response.status_code}): {response.text}")
 
-    return str(response.json()["id"])
+    data = response.json()
+    cmd_status = data.get("sync_status", {}).get(cmd_uuid)
+    if cmd_status != "ok":
+        raise RuntimeError(f"Todoist item_add rejected: {cmd_status} (full response: {data})")
+
+    new_task_id = data.get("temp_id_mapping", {}).get(temp_id)
+    if not new_task_id:
+        raise RuntimeError(f"Todoist did not return a task id: {data}")
+    return str(new_task_id)
 
 
 def move_dropbox_media(dropbox_client, *, from_path: str, to_path: str) -> str:
