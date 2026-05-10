@@ -114,3 +114,69 @@ def test_webhook_schedules_media_handling_as_background_task(client, load_fixtur
     assert response.status_code == 200
     # The background task ran update_media_path → table().update() was called
     mock_sb.table.return_value.update.assert_called()
+
+
+def test_process_command_does_not_insert_item(client, load_fixture, mocker):
+    test_client, mock_sb = client
+    mocker.patch("bot.main.run_batch", return_value={
+        "items_processed": 0, "items_needs_review": 0, "items_failed": 0,
+        "total_cost_cents": 0, "duration_seconds": 0.1,
+    })
+    mocker.patch("bot.main.send_message")
+
+    response = test_client.post(
+        "/webhook/test_secret",
+        json=load_fixture("update_process_command"),
+    )
+    assert response.status_code == 200
+    # No supabase insert should have happened for the /process command itself.
+    insert_calls = [
+        c for c in mock_sb.table.return_value.insert.call_args_list
+        if c.args and isinstance(c.args[0], dict) and "source_message_id" in c.args[0]
+    ]
+    assert insert_calls == []
+
+
+def test_process_command_schedules_run_batch(client, load_fixture, mocker):
+    test_client, _ = client
+    run_batch_mock = mocker.patch(
+        "bot.main.run_batch",
+        return_value={
+            "items_processed": 2, "items_needs_review": 0, "items_failed": 0,
+            "total_cost_cents": 3, "duration_seconds": 4.2,
+        },
+    )
+    mocker.patch("bot.main.send_message")
+
+    response = test_client.post(
+        "/webhook/test_secret",
+        json=load_fixture("update_process_command"),
+    )
+    assert response.status_code == 200
+
+    run_batch_mock.assert_called_once()
+
+
+def test_process_command_replies_with_summary(client, load_fixture, mocker):
+    test_client, _ = client
+    mocker.patch(
+        "bot.main.run_batch",
+        return_value={
+            "items_processed": 2, "items_needs_review": 1, "items_failed": 0,
+            "total_cost_cents": 4, "duration_seconds": 6.0,
+        },
+    )
+    send_mock = mocker.patch("bot.main.send_message")
+
+    test_client.post(
+        "/webhook/test_secret",
+        json=load_fixture("update_process_command"),
+    )
+
+    # send_message is called once for the summary; send_ack is called separately.
+    assert send_mock.call_count >= 1
+    summary_call = send_mock.call_args_list[-1]
+    summary_text = summary_call.kwargs.get("text") or summary_call.args[2]
+    assert "2" in summary_text          # items_processed
+    assert "$0.04" in summary_text      # cost
+    assert "1 needs review" in summary_text or "1 review" in summary_text

@@ -1,6 +1,9 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
+import anthropic
 import httpx
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -13,6 +16,7 @@ from bot.config import Config
 from bot.db import get_client, insert_item, update_media_path
 from bot.intake import parse_update
 from bot.media import DropboxRefreshClient, download_from_telegram, upload_with_fallback
+from bot.processor import run_batch
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -24,6 +28,13 @@ dropbox_factory = DropboxRefreshClient(
     config.dropbox_app_key,
     config.dropbox_app_secret,
 )
+anthropic_client = anthropic.Anthropic(api_key=config.anthropic_api_key)
+
+# Read seed files at startup so the processor doesn't re-read on every batch.
+_RULES_PATH = Path("_meta/rules.md")
+_TAG_VOCAB_PATH = Path("_meta/tag_vocab.md")
+RULES_MD = _RULES_PATH.read_text(encoding="utf-8") if _RULES_PATH.exists() else ""
+TAG_VOCAB_MD = _TAG_VOCAB_PATH.read_text(encoding="utf-8") if _TAG_VOCAB_PATH.exists() else ""
 
 app = FastAPI()
 
@@ -46,14 +57,20 @@ async def webhook(secret: str, request: Request, background_tasks: BackgroundTas
         logger.info("dropping update from unauthorized sender id=%s", sender_id)
         return {"ok": True}
 
+    chat_id = msg["chat"]["id"]
+    message_id = msg["message_id"]
+    text = (msg.get("text") or "").strip()
+
+    if text == "/process":
+        background_tasks.add_task(send_ack, chat_id=chat_id, reply_to=message_id)
+        background_tasks.add_task(_run_batch_and_reply, chat_id=chat_id, reply_to=message_id)
+        return {"ok": True}
+
     try:
         intake = parse_update(update)
     except ValueError as exc:
         logger.warning("could not parse update: %s", exc)
         return {"ok": True}
-
-    chat_id = msg["chat"]["id"]
-    message_id = msg["message_id"]
 
     item = insert_item(
         supabase,
@@ -103,6 +120,53 @@ async def send_ack(chat_id: int, reply_to: int) -> None:
             )
     except Exception:
         logger.exception("ack failed for chat %s", chat_id)
+
+
+async def send_message(chat_id: int, reply_to: int, text: str) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            await http.post(
+                f"https://api.telegram.org/bot{config.bot_token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "reply_to_message_id": reply_to,
+                },
+            )
+    except Exception:
+        logger.exception("send_message failed for chat %s", chat_id)
+
+
+async def _run_batch_and_reply(chat_id: int, reply_to: int) -> None:
+    try:
+        # run_batch is sync and may take seconds. Offload to a thread so the
+        # event loop stays free to serve other webhook requests during the run.
+        result = await asyncio.to_thread(
+            run_batch,
+            supabase_client=supabase,
+            anthropic_client=anthropic_client,
+            dropbox_client_factory=dropbox_factory.get_client,
+            openai_api_key=config.openai_api_key,
+            todoist_token=config.todoist_api_token,
+            todoist_parents=config.todoist_parents,
+            vault_root=config.obsidian_vault_dropbox_path,
+            rules_md=RULES_MD,
+            tag_vocab_md=TAG_VOCAB_MD,
+        )
+        cost_dollars = result["total_cost_cents"] / 100.0
+        text = (
+            f"processed {result['items_processed']} items "
+            f"in {result['duration_seconds']:.1f}s · "
+            f"${cost_dollars:.2f} · "
+            f"{result['items_needs_review']} needs review"
+        )
+        if result["items_failed"]:
+            text += f" · {result['items_failed']} failed"
+    except Exception:
+        logger.exception("/process run failed")
+        text = "/process failed — check journalctl"
+
+    await send_message(chat_id, reply_to, text)
 
 
 def ext_for_media_type(media_type: str) -> str:

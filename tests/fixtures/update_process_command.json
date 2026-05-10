@@ -1,0 +1,10 @@
+{
+  "update_id": 100100,
+  "message": {
+    "message_id": 200,
+    "from": {"id": 12345, "is_bot": false, "first_name": "Ryan"},
+    "chat": {"id": 12345, "type": "private"},
+    "date": 1746565000,
+    "text": "/process"
+  }
+}
