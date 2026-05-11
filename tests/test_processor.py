@@ -486,6 +486,47 @@ def test_process_item_skips_scrape_when_no_x_url(mocker):
     handle_mock.assert_not_called()
 
 
+def test_process_item_skips_scrape_when_item_is_fanout_child(mocker):
+    """Regression: fan-out children inherit raw_text containing the X URL.
+
+    Without the source_post_id guard in process_item, the child re-detects the
+    URL, cache-hits the same source_post, and run_batch fans out N-1 more
+    children — an unbounded loop. Guard must skip handle_x_url entirely when
+    source_post_id is already set on the item.
+    """
+    item = {
+        "id": "fanout-child-1",
+        "media_type": "image",
+        "raw_text": "https://x.com/u/status/123",
+        "media_dropbox_path": "/personal-os/_inbox/_attachments/fanout-child-1-1.jpg",
+        "source_post_id": "sp-already-set",
+    }
+    handle_mock = mocker.patch("bot.processor.handle_x_url")
+    mocker.patch("bot.processor.classify_item", return_value=_fake_classify_response(
+        "design", "image", [], "image from a tweet"
+    ))
+    mocker.patch("bot.processor.write_obsidian_note", return_value="design/x.md")
+    mocker.patch("bot.processor.move_dropbox_media")
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+        supabase_client=MagicMock(),
+        apify_api_token="apify_token",
+        apify_tweet_scraper_actor="xquik~x-tweet-scraper",
+    )
+
+    handle_mock.assert_not_called()
+    assert result["scrape_info"] is None
+    # run_batch keys on scrape_info to decide whether to fan out; None means no fan-out.
+
+
 def test_process_item_continues_when_scraper_errors(mocker):
     from bot.scraper import ScraperError
     item = {

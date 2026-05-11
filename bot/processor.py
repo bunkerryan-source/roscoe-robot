@@ -246,7 +246,15 @@ def process_item(
         # scraped post text can be passed into the classifier payload, and
         # multi-image fan-out can be deferred to run_batch.
         scrape_info = None
-        x_url = extract_x_url(item.get("raw_text", ""))
+        # Skip if item is already a fan-out child of a prior scrape. Without
+        # this guard, the child re-detects the X URL in its inherited raw_text,
+        # cache-hits the same source_post, and run_batch fans out N-1 more
+        # children — an unbounded loop.
+        x_url = (
+            extract_x_url(item.get("raw_text", ""))
+            if not item.get("source_post_id")
+            else None
+        )
         if x_url and supabase_client is not None and apify_api_token:
             try:
                 scrape_info = handle_x_url(
