@@ -152,6 +152,8 @@ async def _run_batch_and_reply(chat_id: int, reply_to: int) -> None:
             vault_root=config.obsidian_vault_dropbox_path,
             rules_md=RULES_MD,
             tag_vocab_md=TAG_VOCAB_MD,
+            apify_api_token=config.apify_api_token,
+            apify_tweet_scraper_actor=config.apify_tweet_scraper_actor,
         )
         cost_dollars = result["total_cost_cents"] / 100.0
         text = (

@@ -7,12 +7,18 @@ This module is the spec's heart. It exposes:
 - `run_batch(...)` — drain the pending queue. Failures isolate per item.
 """
 import logging
+import re
 from datetime import datetime, timezone
 
+import httpx
+
+from bot import scraper
 from bot.db import (
     fetch_pending_items,
     fetch_recent_corrections,
+    get_source_post_by_url,
     insert_run,
+    insert_source_post,
     update_classified,
 )
 from bot.enrichment import (
@@ -26,6 +32,85 @@ from bot.filers import (
     write_obsidian_note,
 )
 from bot.llm import build_classifier_system_prompt, classify_item
+
+X_URL_RE = re.compile(r"https?://(?:x|twitter)\.com/[^\s]+", re.I)
+
+
+def extract_x_url(text: str | None) -> str | None:
+    """Return the first X/Twitter URL in `text`, or None."""
+    if not text:
+        return None
+    m = X_URL_RE.search(text)
+    if not m:
+        return None
+    return m.group(0).rstrip(".,)]\"'")
+
+
+def handle_x_url(supabase_client, url: str, *, token: str, actor: str) -> dict:
+    """Return source_post info for the URL, scraping + inserting if not cached.
+
+    Returns a dict with keys:
+      - source_post_id
+      - image_urls (list)
+      - post_text (str)
+      - midjourney_params (dict)
+    Raises scraper.ScraperError on scrape failure (caller decides fallback).
+    """
+    existing = get_source_post_by_url(supabase_client, url)
+    if existing:
+        return {
+            "source_post_id": existing["id"],
+            "image_urls": existing.get("image_urls") or [],
+            "post_text": existing.get("post_text") or "",
+            "midjourney_params": existing.get("midjourney_params") or {},
+        }
+    result = scraper.fetch_tweet(url, token=token, actor=actor)
+    new_id = insert_source_post(
+        supabase_client,
+        source="x",
+        source_url=result.source_url,
+        post_text=result.post_text,
+        author_handle=result.author_handle,
+        author_name=result.author_name,
+        posted_at=result.posted_at,
+        image_urls=result.image_urls,
+        midjourney_params=result.midjourney_params,
+        raw_response=result.raw_response or {},
+    )
+    return {
+        "source_post_id": new_id,
+        "image_urls": result.image_urls,
+        "post_text": result.post_text,
+        "midjourney_params": result.midjourney_params,
+    }
+
+
+def _download_image_to_dropbox(
+    dropbox_client,
+    image_url: str,
+    item_id: str,
+    *,
+    index: int,
+    vault_root: str,
+    project: str = "_inbox",
+) -> str:
+    """Download an image URL and upload to Dropbox inside the vault.
+
+    Files land at `<vault_root>/<project>/_attachments/<item_id>-<index>.jpg`
+    so Obsidian can resolve the wiki-link embed. The post-classify move step
+    in `process_item` relocates the file to the right project's _attachments
+    folder once classification is done.
+    """
+    from dropbox.files import WriteMode
+
+    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+        resp = client.get(image_url)
+        resp.raise_for_status()
+        content = resp.content
+    ext = ".jpg"  # X images are always jpg via media_url_https
+    dropbox_path = f"{vault_root}/{project}/_attachments/{item_id}-{index}{ext}"
+    dropbox_client.files_upload(f=content, path=dropbox_path, mode=WriteMode("overwrite"))
+    return dropbox_path
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +224,9 @@ def process_item(
     todoist_projects: dict,
     vault_root: str,
     system_blocks: list[dict],
+    supabase_client=None,
+    apify_api_token: str | None = None,
+    apify_tweet_scraper_actor: str | None = None,
 ) -> dict:
     """Run the full pipeline for one item. Never raises — failures land in the result."""
     out = {
@@ -147,17 +235,56 @@ def process_item(
         "obsidian_path": None,
         "todoist_task_id": None,
         "api_cost_cents": 0,
+        "source_post_id": None,
+        "media_dropbox_path": item.get("media_dropbox_path"),
+        "scrape_info": None,
         "error": None,
     }
 
     try:
+        # Phase A — X URL scrape (Session 4). Runs before enrichment so the
+        # scraped post text can be passed into the classifier payload, and
+        # multi-image fan-out can be deferred to run_batch.
+        scrape_info = None
+        x_url = extract_x_url(item.get("raw_text", ""))
+        if x_url and supabase_client is not None and apify_api_token:
+            try:
+                scrape_info = handle_x_url(
+                    supabase_client, x_url,
+                    token=apify_api_token,
+                    actor=apify_tweet_scraper_actor or "xquik~x-tweet-scraper",
+                )
+                out["source_post_id"] = scrape_info["source_post_id"]
+                out["scrape_info"] = scrape_info
+                # Download first image only if the item doesn't already carry user-uploaded media.
+                if scrape_info["image_urls"] and not item.get("media_dropbox_path"):
+                    first_img = scrape_info["image_urls"][0]
+                    staged = _download_image_to_dropbox(
+                        dropbox_client, first_img, item["id"],
+                        index=0, vault_root=vault_root, project="_inbox",
+                    )
+                    item["media_dropbox_path"] = staged
+                    item["media_type"] = "image"
+                    out["media_dropbox_path"] = staged
+            except scraper.ScraperError as e:
+                logger.warning("X scrape failed for %s: %s — falling back to bare URL", x_url, e)
+            except Exception as e:
+                logger.warning("X scrape unexpected error for %s: %s — falling back", x_url, e)
+
         payload, _needs_vision = enrich_item(
             item,
             openai_api_key=openai_api_key,
             dropbox_client=dropbox_client,
         )
-        # Note: vision-call wiring is deferred to Session 4. For now we send
-        # text-only and rely on the caption.
+        # Note: vision-call wiring is deferred to Phase B. For now we send
+        # text-only and rely on the caption + scraped post text.
+
+        # Inject scraped post body into the classifier payload (never into raw_text).
+        if scrape_info and scrape_info.get("post_text"):
+            scraped_block = f"[scraped X post]\n{scrape_info['post_text']}"
+            if scrape_info.get("midjourney_params"):
+                scraped_block += f"\n[midjourney params] {scrape_info['midjourney_params']}"
+            payload = f"{payload}\n\n{scraped_block}" if payload.strip() else scraped_block
 
         if not payload.strip():
             payload = (
@@ -184,6 +311,7 @@ def process_item(
                     from_path=item["media_dropbox_path"],
                     to_path=new_media_path,
                 )
+                out["media_dropbox_path"] = new_media_path
             except Exception as e:
                 logger.warning("media move failed for item %s: %s", item["id"], e)
                 new_media_path = item["media_dropbox_path"]
@@ -223,6 +351,50 @@ def process_item(
     return out
 
 
+def _fan_out_additional_items_from_scrape(
+    supabase_client,
+    dropbox_client,
+    original_item: dict,
+    scrape_info: dict,
+    vault_root: str,
+) -> list[dict]:
+    """Create N-1 additional items rows for images 2..N of a multi-image scrape.
+
+    Returns the newly-inserted item dicts so run_batch can append them to the
+    drain queue. Each new item shares the source_post_id with the original
+    and carries `media_type='image'` with a staged Dropbox path.
+    """
+    image_urls = scrape_info.get("image_urls") or []
+    if len(image_urls) <= 1:
+        return []
+
+    new_items: list[dict] = []
+    for idx, img_url in enumerate(image_urls[1:], start=1):
+        try:
+            row = {
+                "source": original_item.get("source", "telegram"),
+                "source_message_id": original_item["source_message_id"],
+                "raw_text": original_item.get("raw_text"),
+                "media_type": "image",
+                "status": "pending",
+                "source_post_id": scrape_info["source_post_id"],
+            }
+            inserted = supabase_client.table("items").insert(row).execute()
+            new_row = inserted.data[0]
+            staged = _download_image_to_dropbox(
+                dropbox_client, img_url, new_row["id"],
+                index=idx, vault_root=vault_root, project="_inbox",
+            )
+            supabase_client.table("items").update(
+                {"media_dropbox_path": staged}
+            ).eq("id", new_row["id"]).execute()
+            new_row["media_dropbox_path"] = staged
+            new_items.append(new_row)
+        except Exception:
+            logger.exception("fan-out failed for image %d of source_post %s", idx, scrape_info.get("source_post_id"))
+    return new_items
+
+
 def run_batch(
     *,
     supabase_client,
@@ -234,6 +406,8 @@ def run_batch(
     vault_root: str,
     rules_md: str,
     tag_vocab_md: str,
+    apify_api_token: str | None = None,
+    apify_tweet_scraper_actor: str | None = None,
     trigger: str = "on-demand",
     limit: int = 50,
 ) -> dict:
@@ -247,7 +421,12 @@ def run_batch(
 
     dropbox_client = dropbox_client_factory()
 
-    for item in pending:
+    # Use index-based iteration so fan-out can append to `pending` safely.
+    idx = 0
+    while idx < len(pending):
+        item = pending[idx]
+        idx += 1
+
         result = process_item(
             item,
             anthropic_client=anthropic_client,
@@ -257,6 +436,9 @@ def run_batch(
             todoist_projects=todoist_projects,
             vault_root=vault_root,
             system_blocks=system_blocks,
+            supabase_client=supabase_client,
+            apify_api_token=apify_api_token,
+            apify_tweet_scraper_actor=apify_tweet_scraper_actor,
         )
 
         counts["total_cost_cents"] += result["api_cost_cents"] or 0
@@ -288,9 +470,23 @@ def run_batch(
                 todoist_task_id=result["todoist_task_id"],
                 api_cost_cents=result["api_cost_cents"],
                 status=result["status"],
+                source_post_id=result.get("source_post_id"),
+                media_dropbox_path=result.get("media_dropbox_path"),
             )
         except Exception:
             logger.exception("update_classified failed for %s", item["id"])
+
+        # Multi-image fan-out: append additional items to the queue so they're
+        # processed in this same batch run, sharing the source_post_id.
+        scrape_info = result.get("scrape_info")
+        if scrape_info and len(scrape_info.get("image_urls", [])) > 1:
+            try:
+                extra = _fan_out_additional_items_from_scrape(
+                    supabase_client, dropbox_client, item, scrape_info, vault_root,
+                )
+                pending.extend(extra)
+            except Exception:
+                logger.exception("fan-out wrapper failed for item %s", item["id"])
 
     completed = datetime.now(timezone.utc)
 

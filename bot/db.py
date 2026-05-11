@@ -53,6 +53,8 @@ def update_classified(
     todoist_task_id: str | None,
     api_cost_cents: int,
     status: str = "processed",
+    source_post_id: str | None = None,
+    media_dropbox_path: str | None = None,
 ) -> None:
     payload = {
         "status": status,
@@ -69,6 +71,10 @@ def update_classified(
         "confidence": classification.get("confidence"),
         "api_cost_cents": api_cost_cents,
     }
+    if source_post_id is not None:
+        payload["source_post_id"] = source_post_id
+    if media_dropbox_path is not None:
+        payload["media_dropbox_path"] = media_dropbox_path
     client.table("items").update(payload).eq("id", item_id).execute()
 
 
