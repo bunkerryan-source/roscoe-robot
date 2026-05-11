@@ -71,7 +71,11 @@ def write_obsidian_note(
     if raw_text and raw_text != summary:
         body_parts += ["", "## Raw capture", "", raw_text]
     if media_dropbox_path and classification.get("type") == "image":
-        body_parts += ["", f"![Captured image]({media_dropbox_path})"]
+        # Use Obsidian wiki-link syntax so the embed resolves to the file
+        # anywhere inside the vault (e.g., the project's _attachments/ folder).
+        # Filenames are UUIDs so basename collisions are not a concern.
+        filename = media_dropbox_path.rsplit("/", 1)[-1]
+        body_parts += ["", f"![[{filename}]]"]
     note = "\n".join(body_parts).encode("utf-8")
 
     full_path = f"{vault_root}/{obsidian_path}"

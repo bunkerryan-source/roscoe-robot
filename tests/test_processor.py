@@ -20,7 +20,7 @@ def test_enrich_forward_item_returns_raw_text():
 
 
 def test_enrich_voice_item_transcribes(mocker):
-    item = {"media_type": "voice", "raw_text": "", "media_dropbox_path": "/personal-os-inbox/x.ogg"}
+    item = {"media_type": "voice", "raw_text": "", "media_dropbox_path": "/personal-os/_inbox/x.ogg"}
     mocker.patch("bot.processor._download_dropbox_bytes", return_value=b"fake-ogg")
     mocker.patch("bot.processor.transcribe_voice", return_value="follow up with walmart")
 
@@ -54,7 +54,7 @@ def test_enrich_non_youtube_link_uses_og(mocker):
 
 
 def test_enrich_image_with_short_caption_needs_vision():
-    item = {"media_type": "image", "raw_text": "x", "media_dropbox_path": "/personal-os-inbox/x.jpg"}
+    item = {"media_type": "image", "raw_text": "x", "media_dropbox_path": "/personal-os/_inbox/x.jpg"}
     payload, needs_vision = enrich_item(item, openai_api_key="x")
     assert needs_vision is True
 
@@ -63,7 +63,7 @@ def test_enrich_image_with_decisive_caption_skips_vision():
     item = {
         "media_type": "image",
         "raw_text": "lake arrowhead kitchen tile inspiration",
-        "media_dropbox_path": "/personal-os-inbox/x.jpg",
+        "media_dropbox_path": "/personal-os/_inbox/x.jpg",
     }
     payload, needs_vision = enrich_item(item, openai_api_key="x")
     assert needs_vision is False
@@ -148,7 +148,7 @@ def test_process_item_moves_media_for_image(mocker):
         "id": "item-3",
         "media_type": "image",
         "raw_text": "design hero with dark gradient",
-        "media_dropbox_path": "/personal-os-inbox/2026-05-06/item-3.jpg",
+        "media_dropbox_path": "/personal-os/_inbox/2026-05-06/item-3.jpg",
     }
 
     mocker.patch("bot.processor.classify_item", return_value=_fake_classify_response(
@@ -157,7 +157,7 @@ def test_process_item_moves_media_for_image(mocker):
     mocker.patch("bot.processor.write_obsidian_note", return_value="design/2026-05-06-hero.md")
     move_mock = mocker.patch(
         "bot.processor.move_dropbox_media",
-        return_value="/inspiration/design/item-3.jpg",
+        return_value="/personal-os/design/_attachments/item-3.jpg",
     )
 
     result = process_item(
@@ -174,8 +174,8 @@ def test_process_item_moves_media_for_image(mocker):
     assert result["status"] == "processed"
     move_mock.assert_called_once()
     move_kwargs = move_mock.call_args.kwargs
-    assert move_kwargs["from_path"] == "/personal-os-inbox/2026-05-06/item-3.jpg"
-    assert move_kwargs["to_path"].startswith("/inspiration/design/")
+    assert move_kwargs["from_path"] == "/personal-os/_inbox/2026-05-06/item-3.jpg"
+    assert move_kwargs["to_path"] == "/personal-os/design/_attachments/item-3.jpg"
 
 
 def test_process_item_marks_failed_on_classifier_error(mocker):

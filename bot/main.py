@@ -96,7 +96,7 @@ async def handle_media(item_id: str, file_id: str, ext: str) -> None:
     try:
         content = await download_from_telegram(config.bot_token, file_id)
         date_path = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        dropbox_path = f"/personal-os-inbox/{date_path}/{item_id}{ext}"
+        dropbox_path = f"/personal-os/_inbox/{date_path}/{item_id}{ext}"
         result_path = upload_with_fallback(
             dropbox_factory.get_client,
             dropbox_path=dropbox_path,

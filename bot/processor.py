@@ -116,13 +116,17 @@ def enrich_item(
     return raw_text, False
 
 
-def _post_classify_dropbox_path(item_id: str, project: str, type_: str, original_path: str) -> str:
+def _post_classify_dropbox_path(item_id: str, project: str, type_: str, original_path: str, vault_root: str) -> str:
     """Compute where media should live after classification.
-    Design captures → /inspiration/<project>/. Project media → /projects/<project>/media/."""
+
+    All media lives inside the Obsidian vault under
+    `<vault_root>/<project>/_attachments/<item_id>.<ext>` so that Obsidian
+    can resolve embeds via wiki-link syntax. The future design dashboard
+    reads from `<vault_root>/design/_attachments/`.
+    """
     ext = "." + original_path.rsplit(".", 1)[-1] if "." in original_path else ""
-    if project == "design":
-        return f"/inspiration/design/{item_id}{ext}"
-    return f"/projects/{project}/media/{item_id}{ext}"
+    project = project or "personal"
+    return f"{vault_root}/{project}/_attachments/{item_id}{ext}"
 
 
 def process_item(
@@ -173,6 +177,7 @@ def process_item(
                     classification.get("project") or "personal",
                     classification.get("type") or "image",
                     item["media_dropbox_path"],
+                    vault_root,
                 )
                 move_dropbox_media(
                     dropbox_client,

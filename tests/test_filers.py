@@ -54,7 +54,7 @@ def test_obsidian_note_body_contains_frontmatter_and_summary():
         item_id="img-9999",
         classification=classification,
         raw_text="",
-        media_dropbox_path="/inspiration/design/img-9999.jpg",
+        media_dropbox_path="/personal-os/design/_attachments/img-9999.jpg",
         capture_date=date(2026, 5, 6),
     )
 
@@ -69,7 +69,8 @@ def test_obsidian_note_body_contains_frontmatter_and_summary():
     assert "visual_subtype: hero" in note_text
     assert "confidence: 0.93" in note_text
     assert "Hero with dark gradient background." in note_text
-    assert "![[" in note_text or "![" in note_text
+    # Obsidian wiki-link syntax with bare filename (vault-relative resolution)
+    assert "![[img-9999.jpg]]" in note_text
 
 
 def test_obsidian_note_writes_to_correct_dropbox_path():
@@ -181,21 +182,21 @@ def test_create_todoist_task_raises_when_command_rejected():
 def test_move_dropbox_media_calls_files_move_v2():
     fake_dbx = MagicMock()
     fake_dbx.files_move_v2.return_value = MagicMock(
-        metadata=MagicMock(path_display="/inspiration/design/img-9999.jpg")
+        metadata=MagicMock(path_display="/personal-os/design/_attachments/img-9999.jpg")
     )
 
     result = move_dropbox_media(
         fake_dbx,
-        from_path="/personal-os-inbox/2026-05-06/img-9999.jpg",
-        to_path="/inspiration/design/img-9999.jpg",
+        from_path="/personal-os/_inbox/2026-05-06/img-9999.jpg",
+        to_path="/personal-os/design/_attachments/img-9999.jpg",
     )
 
     fake_dbx.files_move_v2.assert_called_once_with(
-        from_path="/personal-os-inbox/2026-05-06/img-9999.jpg",
-        to_path="/inspiration/design/img-9999.jpg",
+        from_path="/personal-os/_inbox/2026-05-06/img-9999.jpg",
+        to_path="/personal-os/design/_attachments/img-9999.jpg",
         autorename=False,
     )
-    assert result == "/inspiration/design/img-9999.jpg"
+    assert result == "/personal-os/design/_attachments/img-9999.jpg"
 
 
 def test_move_dropbox_media_propagates_errors():
