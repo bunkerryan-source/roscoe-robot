@@ -117,11 +117,18 @@ def build_classifier_system_prompt(
     if recent_corrections:
         examples = []
         for i, c in enumerate(recent_corrections, start=1):
-            examples.append(
-                f"Example {i}:\n"
-                f"  Originally classified as: {json.dumps(c['original_class'])}\n"
-                f"  User corrected to:        {json.dumps(c['corrected_class'])}"
+            ctype = c.get("correction_type") or "project"
+            original = c.get("original_value") or {}
+            corrected = c.get("corrected_value") or {}
+            note = c.get("note")
+            example = (
+                f"Example {i} ({ctype}):\n"
+                f"  Originally classified as: {json.dumps(original)}\n"
+                f"  User corrected to:        {json.dumps(corrected)}"
             )
+            if note:
+                example += f"\n  Note: {note}"
+            examples.append(example)
         dynamic_text = (
             "# Recent corrections (newest first) — learn from these\n\n"
             + "\n\n".join(examples)

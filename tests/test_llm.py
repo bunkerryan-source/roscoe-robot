@@ -115,8 +115,10 @@ def test_system_prompt_static_block_includes_rules_and_vocab():
 def test_system_prompt_dynamic_block_includes_corrections():
     corrections = [
         {
-            "original_class": {"project": "personal", "type": "idea"},
-            "corrected_class": {"project": "claude-build", "type": "todo"},
+            "correction_type": "project",
+            "original_value": {"project": "personal", "type": "idea"},
+            "corrected_value": {"project": "claude-build", "type": "todo"},
+            "note": None,
         },
     ]
     blocks = build_classifier_system_prompt(
@@ -127,6 +129,25 @@ def test_system_prompt_dynamic_block_includes_corrections():
     dyn = blocks[1]["text"]
     assert "personal" in dyn and "claude-build" in dyn
     assert "idea" in dyn and "todo" in dyn
+    assert "(project)" in dyn  # correction_type appears in header
+
+
+def test_system_prompt_dynamic_block_includes_note_when_present():
+    corrections = [
+        {
+            "correction_type": "refile",
+            "original_value": {"project": "personal"},
+            "corrected_value": {"project": "design"},
+            "note": "Anything from @user goes to design",
+        },
+    ]
+    blocks = build_classifier_system_prompt(
+        rules_md="",
+        tag_vocab_md="",
+        recent_corrections=corrections,
+    )
+    dyn = blocks[1]["text"]
+    assert "Anything from @user" in dyn
 
 
 def test_system_prompt_dynamic_block_handles_empty_corrections():

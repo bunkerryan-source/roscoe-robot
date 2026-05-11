@@ -3,8 +3,11 @@ from unittest.mock import MagicMock
 from bot.db import (
     fetch_pending_items,
     fetch_recent_corrections,
+    get_source_post_by_url,
+    insert_correction,
     insert_item,
     insert_run,
+    insert_source_post,
     update_classified,
     update_media_path,
 )
@@ -160,13 +163,135 @@ def test_insert_run_writes_summary_row():
 def test_fetch_recent_corrections_orders_newest_first():
     mock_client = MagicMock()
     mock_client.table.return_value.select.return_value.order.return_value.limit.return_value.execute.return_value.data = [
-        {"original_class": {}, "corrected_class": {}},
+        {"correction_type": "project", "original_value": {}, "corrected_value": {}, "note": None},
     ]
 
     result = fetch_recent_corrections(mock_client, limit=30)
 
     mock_client.table.assert_called_with("corrections")
+    select_call = mock_client.table.return_value.select.call_args.args[0]
+    assert "correction_type" in select_call
+    assert "original_value" in select_call
+    assert "corrected_value" in select_call
     mock_client.table.return_value.select.return_value.order.assert_called_with(
         "created_at", desc=True
     )
     assert len(result) == 1
+
+
+def test_get_source_post_by_url_returns_row_when_present():
+    mock_client = MagicMock()
+    row = {"id": "sp-1", "source_url": "https://x.com/u/status/1", "image_urls": ["a.jpg"]}
+    mock_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [row]
+
+    result = get_source_post_by_url(mock_client, "https://x.com/u/status/1")
+
+    mock_client.table.assert_called_with("source_posts")
+    mock_client.table.return_value.select.return_value.eq.assert_called_with(
+        "source_url", "https://x.com/u/status/1"
+    )
+    assert result == row
+
+
+def test_get_source_post_by_url_returns_none_when_missing():
+    mock_client = MagicMock()
+    mock_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+
+    result = get_source_post_by_url(mock_client, "https://x.com/u/status/missing")
+
+    assert result is None
+
+
+def test_insert_source_post_returns_inserted_id_and_writes_all_fields():
+    from datetime import datetime, timezone
+
+    mock_client = MagicMock()
+    mock_client.table.return_value.insert.return_value.execute.return_value.data = [{"id": "sp-new"}]
+    posted = datetime(2025, 6, 5, 20, 19, 24, tzinfo=timezone.utc)
+
+    new_id = insert_source_post(
+        mock_client,
+        source="x",
+        source_url="https://x.com/u/status/1",
+        post_text="hi --sref 999",
+        author_handle="@u",
+        author_name="U",
+        posted_at=posted,
+        image_urls=["a.jpg", "b.jpg"],
+        midjourney_params={"sref": "999"},
+        raw_response={"id": "1"},
+    )
+
+    assert new_id == "sp-new"
+    mock_client.table.assert_called_with("source_posts")
+    payload = mock_client.table.return_value.insert.call_args.args[0]
+    assert payload["source"] == "x"
+    assert payload["source_url"] == "https://x.com/u/status/1"
+    assert payload["post_text"] == "hi --sref 999"
+    assert payload["author_handle"] == "@u"
+    assert payload["posted_at"] == posted.isoformat()
+    assert payload["image_urls"] == ["a.jpg", "b.jpg"]
+    assert payload["midjourney_params"] == {"sref": "999"}
+    assert payload["raw_scraper_response"] == {"id": "1"}
+
+
+def test_insert_source_post_serializes_none_posted_at_as_none():
+    mock_client = MagicMock()
+    mock_client.table.return_value.insert.return_value.execute.return_value.data = [{"id": "sp-2"}]
+
+    insert_source_post(
+        mock_client,
+        source="x",
+        source_url="https://x.com/u/status/2",
+        post_text="",
+        author_handle=None,
+        author_name=None,
+        posted_at=None,
+        image_urls=[],
+        midjourney_params={},
+        raw_response={},
+    )
+
+    payload = mock_client.table.return_value.insert.call_args.args[0]
+    assert payload["posted_at"] is None
+
+
+def test_insert_correction_writes_row_and_returns_id():
+    mock_client = MagicMock()
+    mock_client.table.return_value.insert.return_value.execute.return_value.data = [{"id": "c-1"}]
+
+    new_id = insert_correction(
+        mock_client,
+        item_id="item-1",
+        correction_type="project",
+        original_value={"project": "personal"},
+        corrected_value={"project": "design"},
+        note="Tweets from @sdsmith always design",
+    )
+
+    assert new_id == "c-1"
+    mock_client.table.assert_called_with("corrections")
+    payload = mock_client.table.return_value.insert.call_args.args[0]
+    assert payload["item_id"] == "item-1"
+    assert payload["correction_type"] == "project"
+    assert payload["original_value"] == {"project": "personal"}
+    assert payload["corrected_value"] == {"project": "design"}
+    assert payload["note"] == "Tweets from @sdsmith always design"
+
+
+def test_insert_correction_allows_null_values_and_note():
+    mock_client = MagicMock()
+    mock_client.table.return_value.insert.return_value.execute.return_value.data = [{"id": "c-2"}]
+
+    insert_correction(
+        mock_client,
+        item_id="item-2",
+        correction_type="discard",
+        original_value=None,
+        corrected_value=None,
+    )
+
+    payload = mock_client.table.return_value.insert.call_args.args[0]
+    assert payload["original_value"] is None
+    assert payload["corrected_value"] is None
+    assert payload["note"] is None

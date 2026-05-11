@@ -99,9 +99,72 @@ def insert_run(
 def fetch_recent_corrections(client, limit: int = 30) -> list[dict]:
     response = (
         client.table("corrections")
-        .select("original_class, corrected_class")
+        .select("correction_type, original_value, corrected_value, note")
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
     )
     return response.data or []
+
+
+def get_source_post_by_url(client, source_url: str) -> dict | None:
+    """Return existing source_posts row matched by source_url, or None."""
+    response = (
+        client.table("source_posts")
+        .select("*")
+        .eq("source_url", source_url)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0] if rows else None
+
+
+def insert_source_post(
+    client,
+    *,
+    source: str,
+    source_url: str,
+    post_text: str,
+    author_handle: str | None,
+    author_name: str | None,
+    posted_at,
+    image_urls: list[str],
+    midjourney_params: dict,
+    raw_response: dict,
+) -> str:
+    """Insert a source_posts row and return its id."""
+    payload = {
+        "source": source,
+        "source_url": source_url,
+        "post_text": post_text,
+        "author_handle": author_handle,
+        "author_name": author_name,
+        "posted_at": posted_at.isoformat() if posted_at else None,
+        "image_urls": image_urls,
+        "midjourney_params": midjourney_params,
+        "raw_scraper_response": raw_response,
+    }
+    response = client.table("source_posts").insert(payload).execute()
+    return response.data[0]["id"]
+
+
+def insert_correction(
+    client,
+    *,
+    item_id: str,
+    correction_type: str,
+    original_value: dict | None,
+    corrected_value: dict | None,
+    note: str | None = None,
+) -> str:
+    """Insert a corrections row and return its id."""
+    payload = {
+        "item_id": item_id,
+        "correction_type": correction_type,
+        "original_value": original_value,
+        "corrected_value": corrected_value,
+        "note": note,
+    }
+    response = client.table("corrections").insert(payload).execute()
+    return response.data[0]["id"]
