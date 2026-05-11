@@ -37,7 +37,7 @@ What this session **does** ship:
 
 | Decision | Choice | Why |
 |---|---|---|
-| Apify actor | `apidojo/tweet-scraper` | Established, well-maintained, pay-per-result (~$0.40/1k tweets). |
+| Apify actor | `xquik/x-tweet-scraper` | Confirmed live on free plan, supports single-tweet URLs, pay-per-result only, $0.15 / 1K tweets ($0.00015 each), no per-query fee, no platform fee. `apidojo/tweet-scraper` rejected (can't fetch single tweets, ≥50 minimum). `apidojo/twitter-scraper-lite` rejected ($0.50/tweet on Free plan). |
 | Apify call mechanism | Direct httpx POST to `run-sync-get-dataset-items` endpoint | Avoids `apify-client` dep; matches existing pattern of using httpx everywhere. |
 | Scrape cache policy | Reuse existing `source_posts` row matched by `source_url` | No re-scrape on duplicate captures; saves credits and avoids version skew. |
 | Multi-image fan-out timing | At process time inside the processor | Capture stays fast (no Apify blocking the 👍 ack). |
@@ -87,75 +87,101 @@ If you want to swap any of these, edit this section before starting Task 1.
 
 - [ ] **P1: Create an Apify account.** Sign up at https://apify.com (free tier includes $5/mo of platform credits — plenty for projected volume).
 - [ ] **P2: Get an Apify API token.** Console → Settings → Integrations → API tokens → Create new token, name `roscoe-robot`. Save as `APIFY_API_TOKEN` (starts with `apify_api_`).
-- [ ] **P3: Subscribe to the `apidojo/tweet-scraper` actor.** Visit https://apify.com/apidojo/tweet-scraper → Try for free / Rent. No payment required; pay-per-result billing is consumption-based.
-- [ ] **P4: Verify the actor responds.** From any shell with curl:
+- [ ] **P3: (Removed)** `xquik/x-tweet-scraper` is anonymously runnable; no separate "rent" step required.
+- [ ] **P4: Verify the actor responds with real data.** From any shell with curl:
   ```
-  curl -X POST "https://api.apify.com/v2/acts/apidojo~tweet-scraper/run-sync-get-dataset-items?token=$APIFY_API_TOKEN" \
+  curl -X POST "https://api.apify.com/v2/acts/xquik~x-tweet-scraper/run-sync-get-dataset-items?token=$APIFY_API_TOKEN" \
     -H "Content-Type: application/json" \
-    -d '{"startUrls":[{"url":"https://x.com/dennismark73450/status/2053184837524041822"}]}'
+    -d '{"startUrls":[{"url":"https://x.com/naval/status/1930721134368129164"}],"maxItems":1}'
   ```
-  Expected: JSON array with one object containing `text`, `author`, `media`, etc. If it returns an empty array, the URL may be deleted/private — try a different public tweet.
+  Expected: JSON array with one object containing `text`, `author.username`, `media`, etc. If the response contains `status: "zero-output"` or similar diagnostic, the URL was deleted/private — try a different public tweet. (Already verified during pre-Phase-A planning; this is just a sanity check.)
 - [ ] **P5: Confirm Telegram chat timezone.** Verify the droplet is set to UTC (`timedatectl`); the scheduler will convert to `America/Los_Angeles` internally for the 06:30 / 21:00 wall-clock jobs.
 
 ---
 
 # Phase A — Apify Scraper + Source Posts + Midjourney Extractor
 
-## Task A1: Schema migration for `source_posts`, `items.source_post_id`, `corrections`
+## Task A1: Schema migration for `source_posts`, `items.source_post_id`, `corrections` extension
 
 **Files:**
-- Create: `migrations/0002_source_posts_corrections.sql`
+- Create: `migrations/002_source_posts_and_corrections_extension.sql`
+
+**IMPORTANT:** `corrections` already exists in `001_initial_schema.sql` with columns `original_class` / `corrected_class` (NOT NULL). This migration ALTERs it (rename columns to `original_value` / `corrected_value`, drop NOT NULL, add `correction_type` + `note`) rather than creating fresh. Naming convention matches the existing `001_` 3-digit prefix and lowercase SQL style.
 
 - [ ] **Step 1: Write the migration**
 
 ```sql
--- 0002_source_posts_corrections.sql
+-- 002_source_posts_and_corrections_extension.sql
+-- Session 4: add normalized source_posts table for scraped X posts,
+-- link items via source_post_id (multi-image fan-out), and extend the
+-- existing corrections table with correction_type + note plus nullable values.
 
-CREATE TABLE source_posts (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    source text NOT NULL,                  -- 'x' for now; future: 'youtube', 'instagram'
-    source_url text NOT NULL,
-    post_text text,                        -- scraped body, NEVER from user input
-    author_handle text,                    -- e.g. '@dennismark73450'
-    author_name text,                      -- display name
-    posted_at timestamptz,                 -- when the tweet was posted
-    image_urls text[] DEFAULT '{}',        -- ordered list as returned by scraper
-    midjourney_params jsonb,               -- {sref, ar, style, v, niji, chaos, stylize, weird}
-    raw_scraper_response jsonb,            -- full Apify response, for debugging + future extraction
-    UNIQUE (source, source_url)
+-- 1. source_posts: deduped by (source, source_url)
+create table public.source_posts (
+    id                       uuid primary key default uuid_generate_v4(),
+    created_at               timestamptz not null default now(),
+    source                   text not null,                  -- 'x' for now; future: 'youtube', 'instagram'
+    source_url               text not null,
+    post_text                text,                           -- scraped body, NEVER from user input
+    author_handle            text,                           -- e.g. '@naval'
+    author_name              text,                           -- display name
+    posted_at                timestamptz,                    -- when the tweet was posted
+    image_urls               text[] not null default '{}',   -- ordered list as returned by scraper
+    midjourney_params        jsonb,                          -- {sref, ar, style, v, niji, chaos, stylize, weird}
+    raw_scraper_response     jsonb,                          -- full Apify response, for debugging
+    unique (source, source_url)
 );
 
-CREATE INDEX idx_source_posts_source_url ON source_posts (source_url);
+create index source_posts_source_url_idx on public.source_posts (source_url);
 
-ALTER TABLE items
-    ADD COLUMN source_post_id uuid REFERENCES source_posts(id) ON DELETE SET NULL;
+-- 2. items.source_post_id: N items rows can share one source_posts row (multi-image fan-out)
+alter table public.items
+    add column source_post_id uuid references public.source_posts(id) on delete set null;
 
-CREATE INDEX idx_items_source_post_id ON items (source_post_id);
+create index items_source_post_id_idx on public.items (source_post_id);
 
-CREATE TABLE corrections (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    item_id uuid NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-    correction_type text NOT NULL,         -- 'project' | 'type' | 'tags' | 'destination' | 'discard'
-    original_value jsonb,                  -- whatever the classifier produced
-    corrected_value jsonb,                 -- whatever the operator chose
-    note text                              -- optional free-text
-);
+-- 3. corrections extensions: generic value columns, add correction_type + note.
+--    Existing rows are 0 (Session 4 is what starts populating this); safe to backfill with 'project'.
+alter table public.corrections rename column original_class to original_value;
+alter table public.corrections rename column corrected_class to corrected_value;
+alter table public.corrections alter column original_value drop not null;
+alter table public.corrections alter column corrected_value drop not null;
 
-CREATE INDEX idx_corrections_item_id ON corrections (item_id);
-CREATE INDEX idx_corrections_created_at ON corrections (created_at DESC);
+alter table public.corrections add column correction_type text;
+update public.corrections set correction_type = 'project' where correction_type is null;
+alter table public.corrections alter column correction_type set not null;
+
+alter table public.corrections add column note text;
+
+create index corrections_item_id_idx on public.corrections (item_id);
+-- corrections_created_at_idx already exists from 001; no need to recreate.
 ```
 
 - [ ] **Step 2: Apply via Supabase MCP**
 
-Use the Supabase MCP `apply_migration` tool (project_id `sqzbdkxbeotmywjdksmd`, name `0002_source_posts_corrections`) with the SQL above. Confirm both tables exist by running `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('source_posts','corrections');` — expect 2 rows.
+Use the Supabase MCP `apply_migration` tool (project_id `sqzbdkxbeotmywjdksmd`, name `002_source_posts_and_corrections_extension`) with the SQL above. If the MCP isn't authenticated, fall back to pasting the SQL into Supabase Dashboard → SQL Editor → Run.
+
+Verify with:
+```sql
+select table_name from information_schema.tables
+ where table_schema='public' and table_name in ('source_posts','corrections','items');
+-- expect 3 rows
+
+select column_name from information_schema.columns
+ where table_schema='public' and table_name='corrections'
+ order by ordinal_position;
+-- expect: id, item_id, created_at, original_value, corrected_value, correction_type, note
+
+select column_name from information_schema.columns
+ where table_schema='public' and table_name='items' and column_name='source_post_id';
+-- expect: 1 row
+```
 
 - [ ] **Step 3: Commit**
 
 ```
-git add migrations/0002_source_posts_corrections.sql
-git commit -m "feat(session-4): add source_posts + corrections tables and items.source_post_id"
+git add migrations/002_source_posts_and_corrections_extension.sql docs/superpowers/plans/2026-05-10-session-4-triage-vision-x-scraper.md
+git commit -m "feat(session-4): migration for source_posts + corrections extension"
 ```
 
 ---
@@ -172,7 +198,7 @@ git commit -m "feat(session-4): add source_posts + corrections tables and items.
 ```
 # Apify (X/Twitter scraper) — Session 4
 APIFY_API_TOKEN=apify_api_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-APIFY_TWEET_SCRAPER_ACTOR=apidojo~tweet-scraper
+APIFY_TWEET_SCRAPER_ACTOR=xquik~x-tweet-scraper
 ```
 
 - [ ] **Step 2: Add field to `Config` dataclass in `bot/config.py`.** Find the `@dataclass` block and add two fields next to `openai_api_key`:
@@ -186,7 +212,7 @@ In `from_env`, add reads:
 
 ```python
         apify_api_token=os.environ["APIFY_API_TOKEN"],
-        apify_tweet_scraper_actor=os.environ.get("APIFY_TWEET_SCRAPER_ACTOR", "apidojo~tweet-scraper"),
+        apify_tweet_scraper_actor=os.environ.get("APIFY_TWEET_SCRAPER_ACTOR", "xquik~x-tweet-scraper"),
 ```
 
 Add `APIFY_API_TOKEN` to the `required` list near the top of `from_env`.
@@ -342,7 +368,7 @@ import respx
 from bot.scraper import fetch_tweet, ScrapeResult, ScraperError
 
 
-APIFY_URL = "https://api.apify.com/v2/acts/apidojo~tweet-scraper/run-sync-get-dataset-items"
+APIFY_URL = "https://api.apify.com/v2/acts/xquik~x-tweet-scraper/run-sync-get-dataset-items"
 
 
 @respx.mock
@@ -350,13 +376,13 @@ def test_fetch_tweet_parses_single_image_response():
     respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[{
         "url": "https://x.com/user/status/123",
         "text": "test post --sref 999 --ar 1:1",
-        "author": {"userName": "user", "name": "Display Name"},
+        "author": {"username": "user", "name": "Display Name"},
         "createdAt": "2026-05-10T12:00:00.000Z",
         "media": [
             {"type": "photo", "media_url_https": "https://pbs.twimg.com/media/A.jpg"}
         ],
     }]))
-    result = fetch_tweet("https://x.com/user/status/123", token="t", actor="apidojo~tweet-scraper")
+    result = fetch_tweet("https://x.com/user/status/123", token="t", actor="xquik~x-tweet-scraper")
     assert isinstance(result, ScrapeResult)
     assert result.post_text == "test post --sref 999 --ar 1:1"
     assert result.author_handle == "@user"
@@ -370,7 +396,7 @@ def test_fetch_tweet_parses_multi_image_response_preserves_order():
     respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[{
         "url": "https://x.com/user/status/123",
         "text": "three images",
-        "author": {"userName": "user", "name": "U"},
+        "author": {"username": "user", "name": "U"},
         "createdAt": "2026-05-10T12:00:00.000Z",
         "media": [
             {"type": "photo", "media_url_https": "https://pbs.twimg.com/media/A.jpg"},
@@ -378,7 +404,7 @@ def test_fetch_tweet_parses_multi_image_response_preserves_order():
             {"type": "photo", "media_url_https": "https://pbs.twimg.com/media/C.jpg"},
         ],
     }]))
-    result = fetch_tweet("https://x.com/user/status/123", token="t", actor="apidojo~tweet-scraper")
+    result = fetch_tweet("https://x.com/user/status/123", token="t", actor="xquik~x-tweet-scraper")
     assert result.image_urls == [
         "https://pbs.twimg.com/media/A.jpg",
         "https://pbs.twimg.com/media/B.jpg",
@@ -390,14 +416,14 @@ def test_fetch_tweet_parses_multi_image_response_preserves_order():
 def test_fetch_tweet_handles_empty_result_array():
     respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[]))
     with pytest.raises(ScraperError, match="empty"):
-        fetch_tweet("https://x.com/user/status/deleted", token="t", actor="apidojo~tweet-scraper")
+        fetch_tweet("https://x.com/user/status/deleted", token="t", actor="xquik~x-tweet-scraper")
 
 
 @respx.mock
 def test_fetch_tweet_raises_on_http_error():
     respx.post(APIFY_URL).mock(return_value=httpx.Response(429, text="rate limited"))
     with pytest.raises(ScraperError, match="429"):
-        fetch_tweet("https://x.com/user/status/123", token="t", actor="apidojo~tweet-scraper")
+        fetch_tweet("https://x.com/user/status/123", token="t", actor="xquik~x-tweet-scraper")
 
 
 @respx.mock
@@ -405,12 +431,42 @@ def test_fetch_tweet_skips_video_only_media():
     respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[{
         "url": "https://x.com/user/status/123",
         "text": "video",
-        "author": {"userName": "user", "name": "U"},
+        "author": {"username": "user", "name": "U"},
         "createdAt": "2026-05-10T12:00:00.000Z",
         "media": [{"type": "video", "media_url_https": "https://video.twimg.com/x.mp4"}],
     }]))
-    result = fetch_tweet("https://x.com/user/status/123", token="t", actor="apidojo~tweet-scraper")
+    result = fetch_tweet("https://x.com/user/status/123", token="t", actor="xquik~x-tweet-scraper")
     assert result.image_urls == []  # only photos extracted
+
+
+@respx.mock
+def test_fetch_tweet_raises_on_zero_output_diagnostic():
+    # xquik returns this shape when a tweet ID is missing/deleted
+    respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[{
+        "id": "diag:zero-output:1",
+        "status": "zero-output",
+        "message": "No tweets returned for the requested IDs.",
+        "actor": "x-tweet-scraper",
+    }]))
+    with pytest.raises(ScraperError, match="diagnostic"):
+        fetch_tweet("https://x.com/user/status/deleted", token="t", actor="xquik~x-tweet-scraper")
+
+
+@respx.mock
+def test_fetch_tweet_parses_twitter_format_createdAt():
+    # xquik returns Twitter RFC822-ish dates, not ISO
+    respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[{
+        "url": "https://x.com/naval/status/1",
+        "text": "test",
+        "author": {"username": "naval", "name": "Naval"},
+        "createdAt": "Thu Jun 05 20:19:24 +0000 2025",
+        "media": [],
+    }]))
+    result = fetch_tweet("https://x.com/naval/status/1", token="t", actor="xquik~x-tweet-scraper")
+    assert result.posted_at is not None
+    assert result.posted_at.year == 2025
+    assert result.posted_at.month == 6
+    assert result.posted_at.day == 5
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -458,28 +514,42 @@ class ScrapeResult:
 def fetch_tweet(url: str, *, token: str, actor: str, timeout: float = 60.0) -> ScrapeResult:
     """Synchronously scrape a single X URL via Apify and return ScrapeResult.
 
-    Raises ScraperError on HTTP error or empty result.
+    Raises ScraperError on HTTP error, empty result, or diagnostic-only response.
     """
     endpoint = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
     payload = {"startUrls": [{"url": url}], "maxItems": 1}
     params = {"token": token}
     with httpx.Client(timeout=timeout) as client:
         resp = client.post(endpoint, params=params, json=payload)
-    if resp.status_code != 200:
+    if resp.status_code not in (200, 201):
         raise ScraperError(f"Apify HTTP {resp.status_code}: {resp.text[:200]}")
     data = resp.json()
     if not isinstance(data, list) or not data:
         raise ScraperError(f"Apify returned empty dataset for {url}")
     tweet = data[0]
+    # xquik returns diagnostic rows for missing/deleted tweets; reject them.
+    if _is_diagnostic(tweet):
+        raise ScraperError(f"Apify diagnostic response for {url}: {tweet.get('status') or tweet.get('message') or tweet}")
     return _normalize(url, tweet)
+
+
+def _is_diagnostic(tweet: dict[str, Any]) -> bool:
+    """Return True if the row is an actor diagnostic (zero-output, demo, noResults) rather than a real tweet."""
+    if not tweet.get("text") and not tweet.get("author"):
+        return True
+    if tweet.get("status") in ("zero-output", "not-found", "error"):
+        return True
+    if tweet.get("demo") is True or tweet.get("noResults") is True:
+        return True
+    return False
 
 
 def _normalize(source_url: str, tweet: dict[str, Any]) -> ScrapeResult:
     text = (tweet.get("text") or "").strip()
     author = tweet.get("author") or {}
-    handle_raw = author.get("userName")
+    handle_raw = author.get("username")
     author_handle = f"@{handle_raw}" if handle_raw else None
-    posted_at = _parse_iso(tweet.get("createdAt"))
+    posted_at = _parse_twitter_date(tweet.get("createdAt"))
     media = tweet.get("media") or []
     image_urls = [
         m.get("media_url_https") for m in media
@@ -497,11 +567,21 @@ def _normalize(source_url: str, tweet: dict[str, Any]) -> ScrapeResult:
     )
 
 
-def _parse_iso(value: str | None) -> datetime | None:
+def _parse_twitter_date(value: str | None) -> datetime | None:
+    """Parse Twitter's RFC 822-ish createdAt (e.g. 'Thu Jun 05 20:19:24 +0000 2025').
+
+    Also tolerates ISO 8601 for forward compatibility.
+    """
     if not value:
         return None
+    # Twitter format
     try:
-        # tolerate trailing Z
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        pass
+    # ISO fallback
+    try:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
@@ -510,7 +590,7 @@ def _parse_iso(value: str | None) -> datetime | None:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pytest tests/test_scraper.py -v`
-Expected: All 5 tests PASS.
+Expected: All 7 tests PASS.
 
 - [ ] **Step 5: Commit**
 
