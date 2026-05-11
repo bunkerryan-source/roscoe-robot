@@ -21,6 +21,10 @@ class Config:
     todoist_projects: dict[str, str]
     obsidian_vault_dropbox_path: str
 
+    # New — Session 4
+    apify_api_token: str
+    apify_tweet_scraper_actor: str
+
     @classmethod
     def from_env(cls) -> "Config":
         required = [
@@ -33,6 +37,7 @@ class Config:
             "TODOIST_PROJECT_CLAUDE_BUILD", "TODOIST_PROJECT_DESIGN",
             "TODOIST_PROJECT_PERSONAL",
             "OBSIDIAN_VAULT_DROPBOX_PATH",
+            "APIFY_API_TOKEN",
         ]
         missing = [k for k in required if not os.environ.get(k, "").strip()]
         if missing:
@@ -65,4 +70,8 @@ class Config:
                 "personal": os.environ["TODOIST_PROJECT_PERSONAL"],
             },
             obsidian_vault_dropbox_path=os.environ["OBSIDIAN_VAULT_DROPBOX_PATH"],
+            apify_api_token=os.environ["APIFY_API_TOKEN"],
+            apify_tweet_scraper_actor=os.environ.get(
+                "APIFY_TWEET_SCRAPER_ACTOR", "xquik~x-tweet-scraper"
+            ),
         )

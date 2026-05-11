@@ -25,6 +25,7 @@ ENV_KEYS = [
     "TODOIST_PROJECT_DESIGN",
     "TODOIST_PROJECT_PERSONAL",
     "OBSIDIAN_VAULT_DROPBOX_PATH",
+    "APIFY_API_TOKEN",
 ]
 
 
@@ -49,6 +50,7 @@ def env(monkeypatch):
     monkeypatch.setenv("TODOIST_PROJECT_DESIGN", "1000006")
     monkeypatch.setenv("TODOIST_PROJECT_PERSONAL", "1000007")
     monkeypatch.setenv("OBSIDIAN_VAULT_DROPBOX_PATH", "/personal-os")
+    monkeypatch.setenv("APIFY_API_TOKEN", "test_apify_token")
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"

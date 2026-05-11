@@ -42,3 +42,24 @@ def test_config_raises_on_missing_anthropic_key(env, monkeypatch):
 
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
         Config.from_env()
+
+
+def test_config_loads_session_4_apify_fields(env):
+    cfg = Config.from_env()
+
+    assert cfg.apify_api_token == "test_apify_token"
+    assert cfg.apify_tweet_scraper_actor == "xquik~x-tweet-scraper"
+
+
+def test_config_apify_actor_can_be_overridden(env, monkeypatch):
+    monkeypatch.setenv("APIFY_TWEET_SCRAPER_ACTOR", "some/other-actor")
+    cfg = Config.from_env()
+
+    assert cfg.apify_tweet_scraper_actor == "some/other-actor"
+
+
+def test_config_raises_on_missing_apify_token(env, monkeypatch):
+    monkeypatch.delenv("APIFY_API_TOKEN")
+
+    with pytest.raises(ValueError, match="APIFY_API_TOKEN"):
+        Config.from_env()
