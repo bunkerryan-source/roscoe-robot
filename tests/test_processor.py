@@ -1199,3 +1199,59 @@ def test_download_video_to_dropbox_stages_with_mp4_extension(monkeypatch):
     assert path == "/personal-os/_inbox/_attachments/item-abc.mp4"
     assert captured["fetched_url"] == "https://video.twimg.com/clip.mp4"
     assert captured["bytes_len"] == len(b"FAKE_MP4_BYTES" * 100)
+
+
+def test_process_item_with_x_video_url_downloads_video_and_marks_type(mocker):
+    item = {
+        "id": "item-vid-1",
+        "source": "telegram",
+        "source_message_id": "10",
+        "media_type": "link",
+        "raw_text": "https://x.com/designer/status/9001",
+        "media_dropbox_path": None,
+    }
+    mocker.patch(
+        "bot.processor.handle_x_url",
+        return_value={
+            "source_post_id": "sp-vid",
+            "image_urls": ["https://video.twimg.com/clip.mp4"],
+            "post_text": "cool landing page video",
+            "midjourney_params": {},
+        },
+    )
+    video_download = mocker.patch(
+        "bot.processor._download_video_to_dropbox",
+        return_value="/personal-os/_inbox/_attachments/item-vid-1.mp4",
+    )
+    image_download = mocker.patch("bot.processor._download_image_to_dropbox")
+    mocker.patch(
+        "bot.processor.classify_item",
+        return_value=_fake_classify_response("design", "video", ["hero"], "landing page video"),
+    )
+    mocker.patch("bot.processor.write_obsidian_note", return_value="design/x.md")
+    mocker.patch(
+        "bot.processor.move_dropbox_media",
+        side_effect=lambda dropbox_client, from_path, to_path: None,
+    )
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={"design": "111"},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+        supabase_client=MagicMock(),
+        apify_api_token="apify_token",
+        apify_tweet_scraper_actor="xquik~x-tweet-scraper",
+    )
+
+    assert result["error"] is None
+    assert result["source_post_id"] == "sp-vid"
+    assert result["media_dropbox_path"].endswith(".mp4")
+    video_download.assert_called_once()
+    assert video_download.call_args.args[1] == "https://video.twimg.com/clip.mp4"
+    image_download.assert_not_called()
+    assert item["media_type"] == "video"

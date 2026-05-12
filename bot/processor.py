@@ -322,14 +322,23 @@ def process_item(
                     out["scrape_info"] = scrape_info
                     # Download first image only if the item doesn't already carry user-uploaded media.
                     if scrape_info["image_urls"] and not item.get("media_dropbox_path"):
-                        first_img = scrape_info["image_urls"][0]
-                        staged = _download_image_to_dropbox(
-                            dropbox_client, first_img, item["id"],
-                            index=0, vault_root=vault_root, project="_inbox",
-                        )
-                        item["media_dropbox_path"] = staged
-                        item["media_type"] = "image"
-                        out["media_dropbox_path"] = staged
+                        first_url = scrape_info["image_urls"][0]
+                        if _is_video_url(first_url):
+                            staged = _download_video_to_dropbox(
+                                dropbox_client, first_url, item["id"],
+                                vault_root=vault_root, project="_inbox",
+                            )
+                            item["media_dropbox_path"] = staged
+                            item["media_type"] = "video"
+                            out["media_dropbox_path"] = staged
+                        else:
+                            staged = _download_image_to_dropbox(
+                                dropbox_client, first_url, item["id"],
+                                index=0, vault_root=vault_root, project="_inbox",
+                            )
+                            item["media_dropbox_path"] = staged
+                            item["media_type"] = "image"
+                            out["media_dropbox_path"] = staged
                 except scraper.ScraperError as e:
                     logger.warning("X scrape failed for %s: %s — falling back to bare URL", x_url, e)
                 except Exception as e:
