@@ -25,6 +25,9 @@ class Config:
     apify_api_token: str
     apify_tweet_scraper_actor: str
 
+    # New — Session 5
+    daily_cost_cap_cents: int
+
     @classmethod
     def from_env(cls) -> "Config":
         required = [
@@ -47,6 +50,18 @@ class Config:
             my_id = int(os.environ["MY_TELEGRAM_ID"])
         except ValueError as e:
             raise ValueError("MY_TELEGRAM_ID must be an integer") from e
+
+        cap_raw = os.environ.get("DAILY_COST_CAP_CENTS", "200")
+        try:
+            cap_cents = int(cap_raw)
+        except ValueError as e:
+            raise ValueError(
+                f"DAILY_COST_CAP_CENTS must be an integer, got: {cap_raw!r}"
+            ) from e
+        if cap_cents < 0:
+            raise ValueError(
+                f"DAILY_COST_CAP_CENTS must be >= 0 (0 disables autonomy), got: {cap_cents}"
+            )
 
         return cls(
             bot_token=os.environ["BOT_TOKEN"],
@@ -74,4 +89,5 @@ class Config:
             apify_tweet_scraper_actor=os.environ.get(
                 "APIFY_TWEET_SCRAPER_ACTOR", "xquik~x-tweet-scraper"
             ),
+            daily_cost_cap_cents=cap_cents,
         )

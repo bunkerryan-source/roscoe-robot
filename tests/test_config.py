@@ -63,3 +63,34 @@ def test_config_raises_on_missing_apify_token(env, monkeypatch):
 
     with pytest.raises(ValueError, match="APIFY_API_TOKEN"):
         Config.from_env()
+
+
+def test_config_daily_cost_cap_defaults_to_200_cents(env):
+    cfg = Config.from_env()
+    assert cfg.daily_cost_cap_cents == 200
+
+
+def test_config_daily_cost_cap_reads_env_override(env, monkeypatch):
+    monkeypatch.setenv("DAILY_COST_CAP_CENTS", "350")
+    cfg = Config.from_env()
+    assert cfg.daily_cost_cap_cents == 350
+
+
+def test_config_daily_cost_cap_rejects_non_integer(env, monkeypatch):
+    monkeypatch.setenv("DAILY_COST_CAP_CENTS", "two_dollars")
+    with pytest.raises(ValueError, match="DAILY_COST_CAP_CENTS"):
+        Config.from_env()
+
+
+def test_config_daily_cost_cap_allows_zero_as_kill_switch(env, monkeypatch):
+    # Per rollback plan: DAILY_COST_CAP_CENTS=0 disables autonomy
+    # (every cron sees today_spend >= 0 >= cap and skips silently).
+    monkeypatch.setenv("DAILY_COST_CAP_CENTS", "0")
+    cfg = Config.from_env()
+    assert cfg.daily_cost_cap_cents == 0
+
+
+def test_config_daily_cost_cap_rejects_negative(env, monkeypatch):
+    monkeypatch.setenv("DAILY_COST_CAP_CENTS", "-50")
+    with pytest.raises(ValueError, match="DAILY_COST_CAP_CENTS"):
+        Config.from_env()

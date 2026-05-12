@@ -978,3 +978,163 @@ def test_run_batch_does_not_fan_out_when_single_image(mocker):
     assert process_mock.call_count == 1
     assert result["items_processed"] == 1
     download_mock.assert_not_called()  # no fan-out → no extra downloads
+
+
+# ---------------------------------------------------------------------------
+# Session 5 — daily cost cap
+# ---------------------------------------------------------------------------
+
+
+def _stub_processed_result(cost_cents: int, idx: int) -> dict:
+    return {
+        "status": "processed",
+        "classification": {
+            "project": "personal",
+            "type": "idea",
+            "tags": [],
+            "summary": f"item-{idx}",
+            "confidence": 0.9,
+        },
+        "obsidian_path": f"personal/item-{idx}.md",
+        "todoist_task_id": None,
+        "api_cost_cents": cost_cents,
+        "error": None,
+    }
+
+
+def test_run_batch_halts_when_cap_reached(mocker):
+    pending = [
+        {"id": f"i{n}", "media_type": "text", "raw_text": f"item {n}", "media_dropbox_path": None}
+        for n in range(5)
+    ]
+    mocker.patch("bot.processor.fetch_pending_items", return_value=pending)
+    mocker.patch("bot.processor.fetch_recent_corrections", return_value=[])
+    process_mock = mocker.patch(
+        "bot.processor.process_item",
+        side_effect=[_stub_processed_result(50, i) for i in range(5)],
+    )
+    update_mock = mocker.patch("bot.processor.update_classified")
+    mocker.patch("bot.processor.insert_run", return_value={"id": "run-x"})
+
+    result = run_batch(
+        supabase_client=MagicMock(),
+        anthropic_client=MagicMock(),
+        dropbox_client_factory=lambda: MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        rules_md="",
+        tag_vocab_md="",
+        daily_cap_cents=150,
+        today_already_spent_cents=0,
+    )
+
+    # 3 items × 50¢ = 150¢ — cap hits before item 4 starts.
+    assert process_mock.call_count == 3
+    assert update_mock.call_count == 3
+    assert result["items_processed"] == 3
+    assert result["total_cost_cents"] == 150
+    assert result["halted_at_cap"] is True
+    assert result["items_remaining_pending"] == 2
+
+
+def test_run_batch_unlimited_when_no_cap(mocker):
+    pending = [
+        {"id": f"i{n}", "media_type": "text", "raw_text": f"item {n}", "media_dropbox_path": None}
+        for n in range(5)
+    ]
+    mocker.patch("bot.processor.fetch_pending_items", return_value=pending)
+    mocker.patch("bot.processor.fetch_recent_corrections", return_value=[])
+    mocker.patch(
+        "bot.processor.process_item",
+        side_effect=[_stub_processed_result(50, i) for i in range(5)],
+    )
+    mocker.patch("bot.processor.update_classified")
+    mocker.patch("bot.processor.insert_run", return_value={"id": "run-x"})
+
+    result = run_batch(
+        supabase_client=MagicMock(),
+        anthropic_client=MagicMock(),
+        dropbox_client_factory=lambda: MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        rules_md="",
+        tag_vocab_md="",
+        # No daily_cap_cents kwarg → unlimited (the /process path).
+    )
+
+    assert result["items_processed"] == 5
+    assert result["halted_at_cap"] is False
+    assert result["items_remaining_pending"] == 0
+
+
+def test_run_batch_respects_already_spent_today(mocker):
+    pending = [
+        {"id": f"i{n}", "media_type": "text", "raw_text": f"item {n}", "media_dropbox_path": None}
+        for n in range(5)
+    ]
+    mocker.patch("bot.processor.fetch_pending_items", return_value=pending)
+    mocker.patch("bot.processor.fetch_recent_corrections", return_value=[])
+    process_mock = mocker.patch(
+        "bot.processor.process_item",
+        side_effect=[_stub_processed_result(50, i) for i in range(5)],
+    )
+    mocker.patch("bot.processor.update_classified")
+    mocker.patch("bot.processor.insert_run", return_value={"id": "run-x"})
+
+    result = run_batch(
+        supabase_client=MagicMock(),
+        anthropic_client=MagicMock(),
+        dropbox_client_factory=lambda: MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        rules_md="",
+        tag_vocab_md="",
+        daily_cap_cents=150,
+        today_already_spent_cents=120,
+    )
+
+    # 120 already + first item 50 = 170 ≥ 150 → halt after item 1.
+    assert process_mock.call_count == 1
+    assert result["items_processed"] == 1
+    assert result["total_cost_cents"] == 50
+    assert result["halted_at_cap"] is True
+    assert result["items_remaining_pending"] == 4
+
+
+def test_run_batch_does_not_halt_when_below_cap(mocker):
+    pending = [
+        {"id": f"i{n}", "media_type": "text", "raw_text": f"item {n}", "media_dropbox_path": None}
+        for n in range(3)
+    ]
+    mocker.patch("bot.processor.fetch_pending_items", return_value=pending)
+    mocker.patch("bot.processor.fetch_recent_corrections", return_value=[])
+    mocker.patch(
+        "bot.processor.process_item",
+        side_effect=[_stub_processed_result(5, i) for i in range(3)],
+    )
+    mocker.patch("bot.processor.update_classified")
+    mocker.patch("bot.processor.insert_run", return_value={"id": "run-x"})
+
+    result = run_batch(
+        supabase_client=MagicMock(),
+        anthropic_client=MagicMock(),
+        dropbox_client_factory=lambda: MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        rules_md="",
+        tag_vocab_md="",
+        daily_cap_cents=200,
+        today_already_spent_cents=0,
+    )
+
+    assert result["items_processed"] == 3
+    assert result["halted_at_cap"] is False
+    assert result["items_remaining_pending"] == 0

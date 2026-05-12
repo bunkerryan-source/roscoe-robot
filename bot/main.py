@@ -15,6 +15,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 load_dotenv()
 
 from bot.config import Config
+from bot.cost_cap import fetch_today_spend_cents
 from bot.db import (
     fetch_item,
     fetch_items_for_summary,
@@ -80,14 +81,70 @@ def _utc_window_for_today_la() -> tuple[str, str]:
     )
 
 
-async def _send_morning_summary() -> None:
+def _halt_alert_text(remaining: int, cap_cents: int) -> str:
+    dollars = cap_cents / 100.0
+    noun = "item" if remaining == 1 else "items"
+    return f"⛔ halted at ${dollars:.2f} — {remaining} {noun} remain pending"
+
+
+async def _run_cron_batch(trigger: str) -> dict | None:
+    """Shared cron entry point. Snapshots today's spend, runs the batch under
+    the cap, fires a halt alert if the batch crossed it.
+
+    Returns the run_batch result dict, or None if the cap was already exceeded
+    before the batch started (caller decides what to do).
+    """
+    cap = config.daily_cost_cap_cents
     try:
-        since, until = _utc_window_for_yesterday_la()
+        spent = await asyncio.to_thread(fetch_today_spend_cents, supabase)
+    except Exception:
+        logger.exception("fetch_today_spend_cents failed; assuming 0")
+        spent = 0
+
+    if spent >= cap:
+        logger.info("cron %s skipped: today_spend=%s >= cap=%s", trigger, spent, cap)
+        return None
+
+    try:
+        result = await asyncio.to_thread(
+            run_batch,
+            supabase_client=supabase,
+            anthropic_client=anthropic_client,
+            dropbox_client_factory=dropbox_factory.get_client,
+            openai_api_key=config.openai_api_key,
+            todoist_token=config.todoist_api_token,
+            todoist_projects=config.todoist_projects,
+            vault_root=config.obsidian_vault_dropbox_path,
+            rules_md=RULES_MD,
+            tag_vocab_md=TAG_VOCAB_MD,
+            apify_api_token=config.apify_api_token,
+            apify_tweet_scraper_actor=config.apify_tweet_scraper_actor,
+            trigger=trigger,
+            daily_cap_cents=cap,
+            today_already_spent_cents=spent,
+        )
+    except Exception:
+        logger.exception("cron %s batch failed", trigger)
+        return None
+
+    if result.get("halted_at_cap"):
+        await send_message(
+            config.my_telegram_id,
+            None,
+            _halt_alert_text(result.get("items_remaining_pending", 0), cap),
+        )
+    return result
+
+
+async def _send_summary(window_fn, build_fn) -> None:
+    """Shared summary body — fetch today's/yesterday's items and ship the brief."""
+    try:
+        since, until = window_fn()
         items = await asyncio.to_thread(
             fetch_items_for_summary, supabase, since=since, until=until
         )
         total_cost = sum((it.get("api_cost_cents") or 0) for it in items)
-        text = build_morning_summary(items, total_cost)
+        text = build_fn(items, total_cost)
         needs_review = sum(1 for i in items if i.get("status") == "needs_review")
         await send_message(
             config.my_telegram_id,
@@ -96,33 +153,41 @@ async def _send_morning_summary() -> None:
             reply_markup=build_review_keyboard(needs_review),
         )
     except Exception:
-        logger.exception("morning summary job failed")
+        logger.exception("summary send failed")
 
 
-async def _send_evening_summary() -> None:
-    try:
-        since, until = _utc_window_for_today_la()
-        items = await asyncio.to_thread(
-            fetch_items_for_summary, supabase, since=since, until=until
-        )
-        total_cost = sum((it.get("api_cost_cents") or 0) for it in items)
-        text = build_evening_summary(items, total_cost)
-        needs_review = sum(1 for i in items if i.get("status") == "needs_review")
+async def _morning_cron() -> None:
+    """06:30 LA — process pending items, then send yesterday's summary."""
+    await _run_cron_batch(trigger="scheduled-630")
+    await _send_summary(_utc_window_for_yesterday_la, build_morning_summary)
+
+
+async def _noon_cron() -> None:
+    """12:00 LA — silent batch. Only speaks on failures or a cap hit."""
+    result = await _run_cron_batch(trigger="scheduled-1200")
+    if result is None:
+        return  # over cap (alert already handled) or batch crashed (logged)
+    failed = result.get("items_failed") or 0
+    if failed:
         await send_message(
             config.my_telegram_id,
             None,
-            text,
-            reply_markup=build_review_keyboard(needs_review),
+            f"noon run: {failed} failed — check journalctl",
         )
-    except Exception:
-        logger.exception("evening summary job failed")
+
+
+async def _evening_cron() -> None:
+    """21:00 LA — process pending items, then send today's summary."""
+    await _run_cron_batch(trigger="scheduled-2100")
+    await _send_summary(_utc_window_for_today_la, build_evening_summary)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     scheduler = build_scheduler(
-        morning_job=_send_morning_summary,
-        evening_job=_send_evening_summary,
+        morning_job=_morning_cron,
+        noon_job=_noon_cron,
+        evening_job=_evening_cron,
         timezone="America/Los_Angeles",
     )
     scheduler.start()

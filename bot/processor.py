@@ -464,6 +464,8 @@ def run_batch(
     apify_tweet_scraper_actor: str | None = None,
     trigger: str = "on-demand",
     limit: int = 50,
+    daily_cap_cents: int | None = None,
+    today_already_spent_cents: int = 0,
 ) -> dict:
     started = datetime.now(timezone.utc)
 
@@ -477,7 +479,16 @@ def run_batch(
 
     # Use index-based iteration so fan-out can append to `pending` safely.
     idx = 0
+    halted_at_cap = False
     while idx < len(pending):
+        # Session 5 cap check — fires BEFORE each item so we halt within ≤1
+        # item-cost of the cap. /process passes daily_cap_cents=None to bypass.
+        if daily_cap_cents is not None:
+            projected = today_already_spent_cents + counts["total_cost_cents"]
+            if projected >= daily_cap_cents:
+                halted_at_cap = True
+                break
+
         item = pending[idx]
         idx += 1
 
@@ -559,4 +570,6 @@ def run_batch(
         logger.exception("insert_run failed")
 
     counts["duration_seconds"] = (completed - started).total_seconds()
+    counts["halted_at_cap"] = halted_at_cap
+    counts["items_remaining_pending"] = max(0, len(pending) - idx)
     return counts
