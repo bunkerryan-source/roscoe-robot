@@ -164,7 +164,7 @@ def test_fetch_tweet_extracts_video_url_from_direct_media_url():
         "text": "video",
         "author": {"username": "user", "name": "U"},
         "createdAt": "2026-05-10T12:00:00.000Z",
-        "media": [{"type": "video", "media_url_https": "https://video.twimg.com/x.mp4"}],
+        "media": [{"type": "video", "media_url_https": "https://video.twimg.com/x.mp4", "video_info": {"variants": []}}],
     }]))
     result = fetch_tweet("https://x.com/user/status/123", token="t", actor="xquik~x-tweet-scraper")
     assert result.image_urls == ["https://video.twimg.com/x.mp4"]
