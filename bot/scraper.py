@@ -79,7 +79,7 @@ def _extract_video_url(media_entry: dict[str, Any]) -> str | None:
     variants = (media_entry.get("video_info") or {}).get("variants") or []
     mp4_variants = [
         v for v in variants
-        if v.get("content_type") == "video/mp4" and v.get("url")
+        if isinstance(v, dict) and v.get("content_type") == "video/mp4" and v.get("url")
     ]
     if mp4_variants:
         best = max(mp4_variants, key=lambda v: v.get("bitrate") or 0)
