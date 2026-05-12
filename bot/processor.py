@@ -9,6 +9,7 @@ This module is the spec's heart. It exposes:
 import logging
 import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import httpx
 
@@ -44,7 +45,8 @@ def _is_video_url(url: str | None) -> bool:
     """Return True iff the URL path ends in a known video extension."""
     if not url:
         return False
-    return any(url.lower().endswith(ext) for ext in _VIDEO_EXTENSIONS)
+    path = urlparse(url).path
+    return any(path.lower().endswith(ext) for ext in _VIDEO_EXTENSIONS)
 
 
 def extract_x_url(text: str | None) -> str | None:
