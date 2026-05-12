@@ -471,6 +471,11 @@ def _fan_out_additional_items_from_scrape(
 
     new_items: list[dict] = []
     for idx, img_url in enumerate(image_urls[1:], start=1):
+        if _is_video_url(img_url):
+            # Multi-video fan-out is out of scope for v1. Single-video posts
+            # are the actual use case; mixed video+image posts are rare. Skip
+            # videos here so the existing image helper invariant holds.
+            continue
         try:
             row = {
                 "source": original_item.get("source", "telegram"),

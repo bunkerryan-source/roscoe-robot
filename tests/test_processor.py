@@ -1255,3 +1255,47 @@ def test_process_item_with_x_video_url_downloads_video_and_marks_type(mocker):
     assert video_download.call_args.args[1] == "https://video.twimg.com/clip.mp4"
     image_download.assert_not_called()
     assert item["media_type"] == "video"
+
+
+def test_fan_out_skips_video_urls(mocker):
+    from bot.processor import _fan_out_additional_items_from_scrape
+
+    inserted_rows = [{"id": "child-B"}]  # only B should fan out (A is parent, C is video)
+    insert_iter = iter(inserted_rows)
+
+    mock_supabase = MagicMock()
+    mock_supabase.table.return_value.insert.return_value.execute.side_effect = (
+        lambda: MagicMock(data=[next(insert_iter)])
+    )
+
+    image_download = mocker.patch(
+        "bot.processor._download_image_to_dropbox",
+        side_effect=lambda dropbox_client, image_url, item_id, *, index, vault_root, project: (
+            f"{vault_root}/_inbox/_attachments/{item_id}-{index}.jpg"
+        ),
+    )
+
+    original_item = {
+        "id": "item-parent",
+        "source": "telegram",
+        "source_message_id": "42",
+        "raw_text": "https://x.com/u/status/1",
+    }
+    scrape_info = {
+        "source_post_id": "sp-1",
+        "image_urls": [
+            "https://pbs.twimg.com/media/A.jpg",  # index 0 = parent, never fanned out
+            "https://pbs.twimg.com/media/B.jpg",  # index 1 = fan out as image
+            "https://video.twimg.com/clip.mp4",   # index 2 = MUST be skipped
+        ],
+    }
+
+    new_items = _fan_out_additional_items_from_scrape(
+        mock_supabase, MagicMock(), original_item, scrape_info, "/personal-os",
+    )
+
+    assert len(new_items) == 1
+    assert new_items[0]["id"] == "child-B"
+    assert new_items[0]["media_dropbox_path"].endswith(".jpg")
+    assert image_download.call_count == 1
+    assert image_download.call_args.args[1] == "https://pbs.twimg.com/media/B.jpg"
