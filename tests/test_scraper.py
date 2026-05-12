@@ -153,3 +153,40 @@ def test_fetch_tweet_raw_response_captured_for_debugging():
     respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[body]))
     result = fetch_tweet("https://x.com/u/status/1", token="t", actor="xquik~x-tweet-scraper")
     assert result.raw_response == body
+
+
+@respx.mock
+def test_fetch_tweet_extracts_video_url_from_direct_media_url():
+    # Some Apify actors flatten video entries to just media_url_https pointing
+    # at the .mp4. Accept that shape too.
+    respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[{
+        "url": "https://x.com/user/status/123",
+        "text": "video",
+        "author": {"username": "user", "name": "U"},
+        "createdAt": "2026-05-10T12:00:00.000Z",
+        "media": [{"type": "video", "media_url_https": "https://video.twimg.com/x.mp4"}],
+    }]))
+    result = fetch_tweet("https://x.com/user/status/123", token="t", actor="xquik~x-tweet-scraper")
+    assert result.image_urls == ["https://video.twimg.com/x.mp4"]
+
+
+@respx.mock
+def test_fetch_tweet_orders_images_before_videos_in_mixed_post():
+    respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[{
+        "url": "https://x.com/user/status/123",
+        "text": "mixed",
+        "author": {"username": "user", "name": "U"},
+        "createdAt": "2026-05-10T12:00:00.000Z",
+        "media": [
+            {"type": "video", "media_url_https": "https://video.twimg.com/clip.mp4"},
+            {"type": "photo", "media_url_https": "https://pbs.twimg.com/media/A.jpg"},
+            {"type": "photo", "media_url_https": "https://pbs.twimg.com/media/B.jpg"},
+        ],
+    }]))
+    result = fetch_tweet("https://x.com/user/status/123", token="t", actor="xquik~x-tweet-scraper")
+    # Photos first (existing fan-out invariant), videos appended at the end.
+    assert result.image_urls == [
+        "https://pbs.twimg.com/media/A.jpg",
+        "https://pbs.twimg.com/media/B.jpg",
+        "https://video.twimg.com/clip.mp4",
+    ]
