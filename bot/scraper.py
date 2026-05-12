@@ -66,6 +66,30 @@ def _is_diagnostic(tweet: dict[str, Any]) -> bool:
     return False
 
 
+_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm")
+
+
+def _extract_video_url(media_entry: dict[str, Any]) -> str | None:
+    """Return the best video URL for a media entry, or None.
+
+    Preference order:
+      1. Highest-bitrate `video/mp4` variant in `video_info.variants`.
+      2. Direct `media_url_https` if it ends in a known video extension.
+    """
+    variants = (media_entry.get("video_info") or {}).get("variants") or []
+    mp4_variants = [
+        v for v in variants
+        if v.get("content_type") == "video/mp4" and v.get("url")
+    ]
+    if mp4_variants:
+        best = max(mp4_variants, key=lambda v: v.get("bitrate") or 0)
+        return best["url"]
+    direct = media_entry.get("media_url_https")
+    if direct and any(direct.lower().endswith(ext) for ext in _VIDEO_EXTENSIONS):
+        return direct
+    return None
+
+
 def _normalize(source_url: str, tweet: dict[str, Any]) -> ScrapeResult:
     text = (tweet.get("text") or "").strip()
     author = tweet.get("author") or {}
@@ -73,10 +97,18 @@ def _normalize(source_url: str, tweet: dict[str, Any]) -> ScrapeResult:
     author_handle = f"@{handle_raw}" if handle_raw else None
     posted_at = _parse_twitter_date(tweet.get("createdAt"))
     media = tweet.get("media") or []
-    image_urls = [
+    image_urls: list[str] = [
         m.get("media_url_https") for m in media
         if m.get("type") == "photo" and m.get("media_url_https")
     ]
+    # Videos and animated_gif entries: append video URL after photos so the
+    # existing multi-image fan-out invariant ("image_urls[1:] are all images")
+    # holds for pure-image tweets and mixed tweets order photos-first.
+    for m in media:
+        if m.get("type") in ("video", "animated_gif"):
+            video_url = _extract_video_url(m)
+            if video_url:
+                image_urls.append(video_url)
     return ScrapeResult(
         source_url=source_url,
         post_text=text,
