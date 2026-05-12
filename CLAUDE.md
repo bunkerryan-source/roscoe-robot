@@ -7,7 +7,7 @@ Personal capture-and-route system. Single ingest point (Telegram bot "Roscoe") c
 Read these in order before doing any non-trivial work:
 
 1. [docs/superpowers/specs/2026-05-05-personal-os-design.md](docs/superpowers/specs/2026-05-05-personal-os-design.md) — canonical design (architecture, data model, session roadmap).
-2. [docs/superpowers/plans/](docs/superpowers/plans/) — per-session implementation plans (Session 2 capture, Session 3 process).
+2. [docs/superpowers/plans/](docs/superpowers/plans/) — per-session implementation plans (Sessions 2–5 shipped; Session 6 drafted).
 3. Your memory directory for this project — droplet SSH, Supabase ID, Todoist endpoint, classifier quirks, env-deploy gotchas.
 
 Don't duplicate the spec here; just pointer.
@@ -26,8 +26,10 @@ Smoke test on the droplet: a manual `_noon_cron()` against production state proc
 **Now: validation week #3 — let cron live.** Watch a few full days of autonomous runs. If 200¢ feels too loose or too tight, tune `DAILY_COST_CAP_CENTS` on the droplet (no code change). Do not start Session 6 without explicit instruction.
 
 **Next sessions (per spec):**
-- **Session 6** — Weekly digest (Sonnet 4.6), monthly rule consolidation pass, research-thread clustering.
+- **Session 6** — Weekly digest (Sonnet 4.6), monthly rule consolidation, research-thread clustering. **Plan drafted at [docs/superpowers/plans/2026-05-12-session-6-weekly-digest-rules.md](docs/superpowers/plans/2026-05-12-session-6-weekly-digest-rules.md); two open decisions deferred to implementation start (rule-proposal UX, vault rules.md repo sync).**
 - **Session 7** — `/find` polish, OA-wiki feeders, multi-source ingest.
+
+**Related sibling project:** [../design-dashboard/](../design-dashboard/) — Pinterest-style web viewer for design images this bot captures. Read-only consumer of this project's Supabase + Dropbox. Independent code path / deploy; can be built in parallel with Sessions 6–7.
 
 ## Operator runbook (how Ryan uses the bot)
 
