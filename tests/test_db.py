@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 from bot.db import (
     fetch_items_for_summary,
+    fetch_needs_review_items,
     fetch_pending_items,
     fetch_recent_corrections,
     get_source_post_by_id,
@@ -323,6 +324,37 @@ def test_insert_correction_writes_row_and_returns_id():
     assert payload["original_value"] == {"project": "personal"}
     assert payload["corrected_value"] == {"project": "design"}
     assert payload["note"] == "Tweets from @sdsmith always design"
+
+
+def test_fetch_needs_review_items_filters_by_status_and_orders_oldest_first():
+    mock_client = MagicMock()
+    chain = mock_client.table.return_value.select.return_value.eq.return_value.order.return_value
+    chain.limit.return_value.execute.return_value.data = [
+        {"id": "a", "status": "needs_review", "project": "design"},
+        {"id": "b", "status": "needs_review", "project": "claude-build"},
+    ]
+
+    result = fetch_needs_review_items(mock_client, limit=20)
+
+    mock_client.table.assert_called_with("items")
+    select_arg = mock_client.table.return_value.select.call_args.args[0]
+    for col in ("id", "raw_text", "media_type", "media_dropbox_path", "project", "type", "tags", "summary"):
+        assert col in select_arg
+    mock_client.table.return_value.select.return_value.eq.assert_called_with("status", "needs_review")
+    mock_client.table.return_value.select.return_value.eq.return_value.order.assert_called_with(
+        "processed_at", desc=False
+    )
+    chain.limit.assert_called_with(20)
+    assert len(result) == 2
+
+
+def test_fetch_needs_review_items_returns_empty_when_no_rows():
+    mock_client = MagicMock()
+    mock_client.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = []
+
+    result = fetch_needs_review_items(mock_client)
+
+    assert result == []
 
 
 def test_insert_correction_allows_null_values_and_note():

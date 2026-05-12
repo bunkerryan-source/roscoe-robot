@@ -27,6 +27,9 @@ def client(env, mocker):
     respx_mock.post("/bottest_bot_token/sendMessage").mock(
         return_value=httpx.Response(200, json={"ok": True})
     )
+    respx_mock.post("/bottest_bot_token/answerCallbackQuery").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
     respx_mock.get("/bottest_bot_token/getFile").mock(
         return_value=httpx.Response(200, json={"ok": True, "result": {"file_path": "p/f.jpg"}})
     )
@@ -199,6 +202,78 @@ def test_webhook_drops_callback_query_from_unauthorized_sender(client, mocker):
     )
     assert response.status_code == 200
     handler.assert_not_called()
+
+
+def test_review_start_sends_first_needs_review_item_with_action_keyboard(client, mocker):
+    test_client, mock_sb = client
+    mock_sb.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
+        {
+            "id": "item-1",
+            "raw_text": "interesting hero treatment",
+            "media_type": "image",
+            "media_dropbox_path": "/inbox/x.jpg",
+            "project": "design",
+            "type": "image",
+            "tags": ["hero"],
+            "summary": "blue hero with rough texture",
+            "source_post_id": None,
+        },
+        {"id": "item-2"},
+    ]
+    send_mock = mocker.patch("bot.main.send_message")
+
+    response = test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 10,
+            "callback_query": {
+                "id": "cb-10",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 50},
+                "data": "review:start",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    send_mock.assert_called_once()
+    args, kwargs = send_mock.call_args
+    assert args[0] == 12345
+    assert args[1] is None  # no reply_to anchor — fresh message
+    text = args[2]
+    assert "Review 1 of 2" in text
+    assert "design" in text
+    assert "interesting hero treatment" in text
+    reply_markup = kwargs["reply_markup"]
+    flat = [b for row in reply_markup["inline_keyboard"] for b in row]
+    callbacks = [b["callback_data"] for b in flat]
+    assert "keep:item-1" in callbacks
+    assert "refile:item-1" in callbacks
+
+
+def test_review_start_with_empty_queue_says_nothing_to_review(client, mocker):
+    test_client, mock_sb = client
+    mock_sb.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = []
+    send_mock = mocker.patch("bot.main.send_message")
+
+    response = test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 11,
+            "callback_query": {
+                "id": "cb-11",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 51},
+                "data": "review:start",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    send_mock.assert_called_once()
+    text = send_mock.call_args.args[2]
+    assert "Nothing needs review" in text
+    assert "reply_markup" not in send_mock.call_args.kwargs or send_mock.call_args.kwargs.get("reply_markup") is None
 
 
 def test_webhook_callback_query_setproj_payload_keeps_inner_colon(client, mocker):

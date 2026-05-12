@@ -15,13 +15,23 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 load_dotenv()
 
 from bot.config import Config
-from bot.db import fetch_items_for_summary, get_client, insert_item, update_media_path
+from bot.db import (
+    fetch_items_for_summary,
+    fetch_needs_review_items,
+    get_client,
+    insert_item,
+    update_media_path,
+)
 from bot.intake import parse_update
 from bot.media import DropboxRefreshClient, download_from_telegram, upload_with_fallback
 from bot.processor import run_batch
 from bot.scheduler import build_scheduler
 from bot.summary import build_evening_summary, build_morning_summary
-from bot.triage import build_review_keyboard, parse_callback_data
+from bot.triage import (
+    build_item_action_keyboard,
+    build_review_keyboard,
+    parse_callback_data,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -280,7 +290,42 @@ async def _handle_triage_callback(
     """
     await _answer_callback_query(callback_id)
     logger.info("triage callback action=%s payload=%s", action, payload)
-    # Real action branches are wired in subsequent Phase D tasks (D3-D5).
+    if action == "review" and payload == "start":
+        await _start_review(chat_id)
+        return
+    # Remaining action branches (keep/refile/setproj/todo/discard) land in D4-D5.
+
+
+def _render_review_card(item: dict, position: int, total: int) -> str:
+    """Compact text payload for an item under triage."""
+    raw = (item.get("raw_text") or "").strip()
+    return (
+        f"Review {position} of {total}\n\n"
+        f"Project: {item.get('project') or '—'}\n"
+        f"Type: {item.get('type') or '—'}\n"
+        f"Summary: {item.get('summary') or '—'}\n\n"
+        f"Original: {raw[:300]}"
+    )
+
+
+async def _start_review(chat_id: int) -> None:
+    """Send the first needs_review item with its action keyboard.
+
+    No reply_to anchor — the review card is a fresh message in the chat so
+    the user can scroll back to context without losing the keyboard.
+    """
+    items = await asyncio.to_thread(fetch_needs_review_items, supabase, 20)
+    if not items:
+        await send_message(chat_id, None, "Nothing needs review. ✨")
+        return
+    first = items[0]
+    text = _render_review_card(first, position=1, total=len(items))
+    await send_message(
+        chat_id,
+        None,
+        text,
+        reply_markup=build_item_action_keyboard(first["id"]),
+    )
 
 
 async def _run_batch_and_reply(chat_id: int, reply_to: int) -> None:

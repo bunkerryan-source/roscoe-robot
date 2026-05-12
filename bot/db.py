@@ -120,6 +120,27 @@ def fetch_items_for_summary(client, *, since: str, until: str) -> list[dict]:
     return response.data or []
 
 
+def fetch_needs_review_items(client, limit: int = 20) -> list[dict]:
+    """Items that landed in needs_review and are awaiting human triage.
+
+    Ordered oldest-first so the triage walk through the queue mirrors the
+    capture order. Selects only the columns the triage card renders so the
+    payload stays small.
+    """
+    response = (
+        client.table("items")
+        .select(
+            "id, raw_text, media_type, media_dropbox_path, project, type, "
+            "tags, summary, source_post_id"
+        )
+        .eq("status", "needs_review")
+        .order("processed_at", desc=False)
+        .limit(limit)
+        .execute()
+    )
+    return response.data or []
+
+
 def fetch_recent_corrections(client, limit: int = 30) -> list[dict]:
     response = (
         client.table("corrections")
