@@ -29,7 +29,9 @@ TEST_MARKER = "[TRIAGE-TEST]"
 
 
 def _build_items() -> list[dict]:
-    now = datetime.now(timezone.utc).isoformat()
+    # Backdate processed_at so these sort to the top of the queue
+    # (fetch_needs_review_items orders oldest-first by processed_at).
+    now = "2020-01-01T00:00:00+00:00"
     return [
         {
             "status": "needs_review",

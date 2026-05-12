@@ -263,6 +263,7 @@ def test_callback_keep_marks_item_processed_and_writes_correction(client, mocker
         "id": "item-x", "project": "design", "type": "image",
         "tags": ["hero"], "status": "needs_review",
     })
+    mocker.patch("bot.main._start_review")  # isolate from auto-advance
     send_mock = mocker.patch("bot.main.send_message")
 
     response = test_client.post(
@@ -298,6 +299,7 @@ def test_callback_discard_marks_item_discarded_and_writes_correction(client, moc
         "id": "item-y", "project": "personal", "type": "link",
         "tags": [], "status": "needs_review",
     })
+    mocker.patch("bot.main._start_review")
     send_mock = mocker.patch("bot.main.send_message")
 
     test_client.post(
@@ -328,6 +330,7 @@ def test_callback_mark_todo_sets_type_todo_and_writes_correction(client, mocker)
         "id": "item-z", "project": "acute", "type": "note",
         "tags": [], "status": "needs_review",
     })
+    mocker.patch("bot.main._start_review")
     send_mock = mocker.patch("bot.main.send_message")
 
     test_client.post(
@@ -351,6 +354,77 @@ def test_callback_mark_todo_sets_type_todo_and_writes_correction(client, mocker)
     assert insert_payload["corrected_value"] == {"type": "todo"}
     text = send_mock.call_args.args[2]
     assert "todo" in text.lower()
+
+
+def test_callback_keep_is_idempotent_on_already_processed_item(client, mocker):
+    """Double-tap / Telegram retry safety: a second Keep on an already-processed
+    item must not write another corrections row and must not reply twice."""
+    test_client, mock_sb = client
+    _stub_fetch_item(mock_sb, {
+        "id": "item-already", "project": "design", "type": "image",
+        "tags": [], "status": "processed",  # already triaged
+    })
+    mocker.patch("bot.main._start_review")
+    send_mock = mocker.patch("bot.main.send_message")
+
+    test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 40,
+            "callback_query": {
+                "id": "cb-dup",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 400},
+                "data": "keep:item-already",
+            },
+        },
+    )
+
+    mock_sb.table.return_value.update.assert_not_called()
+    mock_sb.table.return_value.insert.assert_not_called()
+    send_mock.assert_not_called()
+
+
+def test_callback_keep_auto_advances_to_next_review_card(client, mocker):
+    """After a successful Keep, the next needs_review card should arrive
+    automatically — no need to re-tap the daily-summary Review button."""
+    test_client, mock_sb = client
+    _stub_fetch_item(mock_sb, {
+        "id": "item-acted", "project": "design", "type": "image",
+        "tags": [], "status": "needs_review",
+    })
+    # fetch_needs_review_items uses a different chain (select.eq.order.limit)
+    # than fetch_item (select.eq.limit), so we wire that chain explicitly.
+    mock_sb.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
+        {"id": "item-next", "project": "claude-build", "type": "link",
+         "tags": [], "summary": "the next card", "raw_text": "tap me next",
+         "status": "needs_review"},
+    ]
+    send_mock = mocker.patch("bot.main.send_message")
+
+    test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 41,
+            "callback_query": {
+                "id": "cb-adv",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 401},
+                "data": "keep:item-acted",
+            },
+        },
+    )
+
+    # Two calls: first the "Kept." confirmation, second the next review card.
+    assert send_mock.call_count == 2
+    first, second = send_mock.call_args_list
+    assert "Kept" in first.args[2]
+    assert "Review 1 of 1" in second.args[2]
+    assert "tap me next" in second.args[2]
+    # The next card carries its own item-action keyboard, anchored to item-next.
+    kb = second.kwargs["reply_markup"]
+    flat = [b for row in kb["inline_keyboard"] for b in row]
+    assert any(b["callback_data"] == "keep:item-next" for b in flat)
 
 
 def test_callback_refile_sends_project_picker_keyboard(client, mocker):
@@ -388,6 +462,7 @@ def test_callback_setproj_updates_project_and_writes_correction(client, mocker):
         "id": "item-r", "project": "claude-build", "type": "image",
         "tags": [], "status": "needs_review",
     })
+    mocker.patch("bot.main._start_review")
     send_mock = mocker.patch("bot.main.send_message")
 
     test_client.post(

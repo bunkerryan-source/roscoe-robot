@@ -353,11 +353,37 @@ def _classification_snapshot(item: dict) -> dict:
     return {k: item.get(k) for k in ("project", "type", "tags")}
 
 
-async def _handle_keep(item_id: str, chat_id: int, message_id: int) -> None:
-    """User confirms the existing classification — flip status to processed."""
+async def _load_for_triage(
+    item_id: str, chat_id: int, message_id: int
+) -> dict | None:
+    """Fetch an item for a triage action, idempotently.
+
+    Returns None and exits silently (no Telegram message) when the item has
+    already been triaged — catches double-taps, Telegram retries, or
+    duplicate BackgroundTasks deliveries without spamming the chat with a
+    second confirmation.
+
+    Returns None and replies "Item not found." when the row genuinely
+    doesn't exist.
+    """
     item = await asyncio.to_thread(fetch_item, supabase, item_id)
     if not item:
         await send_message(chat_id, message_id, "Item not found.")
+        return None
+    if item.get("status") != "needs_review":
+        logger.info(
+            "ignoring duplicate triage action on %s (status=%s)",
+            item_id,
+            item.get("status"),
+        )
+        return None
+    return item
+
+
+async def _handle_keep(item_id: str, chat_id: int, message_id: int) -> None:
+    """User confirms the existing classification — flip status to processed."""
+    item = await _load_for_triage(item_id, chat_id, message_id)
+    if item is None:
         return
     snapshot = _classification_snapshot(item)
     await asyncio.to_thread(update_item_fields, supabase, item_id, status="processed")
@@ -371,13 +397,13 @@ async def _handle_keep(item_id: str, chat_id: int, message_id: int) -> None:
         note=None,
     )
     await send_message(chat_id, message_id, "✅ Kept.")
+    await _start_review(chat_id)
 
 
 async def _handle_discard(item_id: str, chat_id: int, message_id: int) -> None:
     """Trash the item — status=discarded, write a discard correction."""
-    item = await asyncio.to_thread(fetch_item, supabase, item_id)
-    if not item:
-        await send_message(chat_id, message_id, "Item not found.")
+    item = await _load_for_triage(item_id, chat_id, message_id)
+    if item is None:
         return
     await asyncio.to_thread(update_item_fields, supabase, item_id, status="discarded")
     await asyncio.to_thread(
@@ -390,6 +416,7 @@ async def _handle_discard(item_id: str, chat_id: int, message_id: int) -> None:
         note=None,
     )
     await send_message(chat_id, message_id, "\U0001F5D1 Discarded.")
+    await _start_review(chat_id)
 
 
 async def _handle_mark_todo(item_id: str, chat_id: int, message_id: int) -> None:
@@ -399,9 +426,8 @@ async def _handle_mark_todo(item_id: str, chat_id: int, message_id: int) -> None
     classifier is re-run, or Ryan adds the task manually. Keeps the triage
     flow cheap and avoids side effects to Todoist on every tap.
     """
-    item = await asyncio.to_thread(fetch_item, supabase, item_id)
-    if not item:
-        await send_message(chat_id, message_id, "Item not found.")
+    item = await _load_for_triage(item_id, chat_id, message_id)
+    if item is None:
         return
     await asyncio.to_thread(
         update_item_fields, supabase, item_id, type="todo", status="processed"
@@ -420,6 +446,7 @@ async def _handle_mark_todo(item_id: str, chat_id: int, message_id: int) -> None
         message_id,
         "\U0001F4DD Marked as todo. (Not filed to Todoist yet — add manually or re-/process.)",
     )
+    await _start_review(chat_id)
 
 
 async def _handle_refile_prompt(item_id: str, chat_id: int, message_id: int) -> None:
@@ -439,9 +466,8 @@ async def _handle_set_project(
     if new_project not in PROJECTS:
         await send_message(chat_id, message_id, f"Unknown project: {new_project}")
         return
-    item = await asyncio.to_thread(fetch_item, supabase, item_id)
-    if not item:
-        await send_message(chat_id, message_id, "Item not found.")
+    item = await _load_for_triage(item_id, chat_id, message_id)
+    if item is None:
         return
     original_project = item.get("project")
     await asyncio.to_thread(
@@ -461,6 +487,7 @@ async def _handle_set_project(
         note=None,
     )
     await send_message(chat_id, message_id, f"\U0001F4C2 Refiled to {new_project}.")
+    await _start_review(chat_id)
 
 
 async def _run_batch_and_reply(chat_id: int, reply_to: int) -> None:
