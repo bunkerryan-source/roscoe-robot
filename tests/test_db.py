@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 from bot.db import (
+    fetch_item,
     fetch_items_for_summary,
     fetch_needs_review_items,
     fetch_pending_items,
@@ -12,6 +13,7 @@ from bot.db import (
     insert_run,
     insert_source_post,
     update_classified,
+    update_item_fields,
     update_media_path,
 )
 
@@ -346,6 +348,35 @@ def test_fetch_needs_review_items_filters_by_status_and_orders_oldest_first():
     )
     chain.limit.assert_called_with(20)
     assert len(result) == 2
+
+
+def test_fetch_item_returns_row_when_present():
+    mock_client = MagicMock()
+    row = {"id": "abc-1", "project": "design", "type": "image", "status": "needs_review"}
+    mock_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [row]
+
+    result = fetch_item(mock_client, "abc-1")
+
+    mock_client.table.assert_called_with("items")
+    mock_client.table.return_value.select.return_value.eq.assert_called_with("id", "abc-1")
+    assert result == row
+
+
+def test_fetch_item_returns_none_when_missing():
+    mock_client = MagicMock()
+    mock_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+
+    assert fetch_item(mock_client, "missing") is None
+
+
+def test_update_item_fields_patches_only_passed_columns():
+    mock_client = MagicMock()
+    update_item_fields(mock_client, "abc-1", status="processed", project="design")
+
+    mock_client.table.assert_called_with("items")
+    payload = mock_client.table.return_value.update.call_args.args[0]
+    assert payload == {"status": "processed", "project": "design"}
+    mock_client.table.return_value.update.return_value.eq.assert_called_with("id", "abc-1")
 
 
 def test_fetch_needs_review_items_returns_empty_when_no_rows():

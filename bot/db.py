@@ -120,6 +120,31 @@ def fetch_items_for_summary(client, *, since: str, until: str) -> list[dict]:
     return response.data or []
 
 
+def fetch_item(client, item_id: str) -> dict | None:
+    """Single item by id — read-side helper for triage handlers that need to
+    capture the pre-change state before writing a corrections row.
+    """
+    response = (
+        client.table("items")
+        .select("*")
+        .eq("id", item_id)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0] if rows else None
+
+
+def update_item_fields(client, item_id: str, **fields) -> None:
+    """Patch arbitrary columns on an item by id.
+
+    Used by triage handlers to flip status/type/project without rebuilding
+    the whole classification payload that update_classified takes. Caller
+    chooses the columns so the corrections-row pair stays in sync.
+    """
+    client.table("items").update(fields).eq("id", item_id).execute()
+
+
 def fetch_needs_review_items(client, limit: int = 20) -> list[dict]:
     """Items that landed in needs_review and are awaiting human triage.
 

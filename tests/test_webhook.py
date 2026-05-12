@@ -251,6 +251,131 @@ def test_review_start_sends_first_needs_review_item_with_action_keyboard(client,
     assert "refile:item-1" in callbacks
 
 
+def _stub_fetch_item(mock_sb, row: dict | None):
+    """Wire mock_sb so fetch_item returns the given row (or None)."""
+    data = [row] if row is not None else []
+    mock_sb.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = data
+
+
+def test_callback_keep_marks_item_processed_and_writes_correction(client, mocker):
+    test_client, mock_sb = client
+    _stub_fetch_item(mock_sb, {
+        "id": "item-x", "project": "design", "type": "image",
+        "tags": ["hero"], "status": "needs_review",
+    })
+    send_mock = mocker.patch("bot.main.send_message")
+
+    response = test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 20,
+            "callback_query": {
+                "id": "cb-keep",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 200},
+                "data": "keep:item-x",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    update_payload = mock_sb.table.return_value.update.call_args.args[0]
+    assert update_payload == {"status": "processed"}
+    mock_sb.table.return_value.update.return_value.eq.assert_called_with("id", "item-x")
+    insert_payload = mock_sb.table.return_value.insert.call_args.args[0]
+    assert insert_payload["item_id"] == "item-x"
+    assert insert_payload["correction_type"] == "keep"
+    assert insert_payload["original_value"] == {"project": "design", "type": "image", "tags": ["hero"]}
+    assert insert_payload["corrected_value"] == {"project": "design", "type": "image", "tags": ["hero"]}
+    send_mock.assert_called_once()
+    text = send_mock.call_args.args[2]
+    assert "Kept" in text
+
+
+def test_callback_discard_marks_item_discarded_and_writes_correction(client, mocker):
+    test_client, mock_sb = client
+    _stub_fetch_item(mock_sb, {
+        "id": "item-y", "project": "personal", "type": "link",
+        "tags": [], "status": "needs_review",
+    })
+    send_mock = mocker.patch("bot.main.send_message")
+
+    test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 21,
+            "callback_query": {
+                "id": "cb-disc",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 201},
+                "data": "discard:item-y",
+            },
+        },
+    )
+
+    update_payload = mock_sb.table.return_value.update.call_args.args[0]
+    assert update_payload == {"status": "discarded"}
+    insert_payload = mock_sb.table.return_value.insert.call_args.args[0]
+    assert insert_payload["correction_type"] == "discard"
+    assert insert_payload["corrected_value"] == {"status": "discarded"}
+    text = send_mock.call_args.args[2]
+    assert "Discarded" in text
+
+
+def test_callback_mark_todo_sets_type_todo_and_writes_correction(client, mocker):
+    test_client, mock_sb = client
+    _stub_fetch_item(mock_sb, {
+        "id": "item-z", "project": "acute", "type": "note",
+        "tags": [], "status": "needs_review",
+    })
+    send_mock = mocker.patch("bot.main.send_message")
+
+    test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 22,
+            "callback_query": {
+                "id": "cb-todo",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 202},
+                "data": "todo:item-z",
+            },
+        },
+    )
+
+    update_payload = mock_sb.table.return_value.update.call_args.args[0]
+    assert update_payload == {"type": "todo", "status": "processed"}
+    insert_payload = mock_sb.table.return_value.insert.call_args.args[0]
+    assert insert_payload["correction_type"] == "type"
+    assert insert_payload["original_value"] == {"type": "note"}
+    assert insert_payload["corrected_value"] == {"type": "todo"}
+    text = send_mock.call_args.args[2]
+    assert "todo" in text.lower()
+
+
+def test_callback_keep_on_missing_item_says_not_found(client, mocker):
+    test_client, mock_sb = client
+    _stub_fetch_item(mock_sb, None)
+    send_mock = mocker.patch("bot.main.send_message")
+
+    test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 23,
+            "callback_query": {
+                "id": "cb-missing",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 203},
+                "data": "keep:gone",
+            },
+        },
+    )
+
+    text = send_mock.call_args.args[2]
+    assert "not found" in text.lower()
+    mock_sb.table.return_value.update.assert_not_called()
+
+
 def test_review_start_with_empty_queue_says_nothing_to_review(client, mocker):
     test_client, mock_sb = client
     mock_sb.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = []

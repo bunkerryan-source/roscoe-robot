@@ -16,10 +16,13 @@ load_dotenv()
 
 from bot.config import Config
 from bot.db import (
+    fetch_item,
     fetch_items_for_summary,
     fetch_needs_review_items,
     get_client,
+    insert_correction,
     insert_item,
+    update_item_fields,
     update_media_path,
 )
 from bot.intake import parse_update
@@ -293,7 +296,16 @@ async def _handle_triage_callback(
     if action == "review" and payload == "start":
         await _start_review(chat_id)
         return
-    # Remaining action branches (keep/refile/setproj/todo/discard) land in D4-D5.
+    if action == "keep":
+        await _handle_keep(payload, chat_id, message_id)
+        return
+    if action == "discard":
+        await _handle_discard(payload, chat_id, message_id)
+        return
+    if action == "todo":
+        await _handle_mark_todo(payload, chat_id, message_id)
+        return
+    # Refile branches (refile + setproj) land in D5.
 
 
 def _render_review_card(item: dict, position: int, total: int) -> str:
@@ -325,6 +337,80 @@ async def _start_review(chat_id: int) -> None:
         None,
         text,
         reply_markup=build_item_action_keyboard(first["id"]),
+    )
+
+
+def _classification_snapshot(item: dict) -> dict:
+    """Captured pre-change values for the corrections row."""
+    return {k: item.get(k) for k in ("project", "type", "tags")}
+
+
+async def _handle_keep(item_id: str, chat_id: int, message_id: int) -> None:
+    """User confirms the existing classification — flip status to processed."""
+    item = await asyncio.to_thread(fetch_item, supabase, item_id)
+    if not item:
+        await send_message(chat_id, message_id, "Item not found.")
+        return
+    snapshot = _classification_snapshot(item)
+    await asyncio.to_thread(update_item_fields, supabase, item_id, status="processed")
+    await asyncio.to_thread(
+        insert_correction,
+        supabase,
+        item_id=item_id,
+        correction_type="keep",
+        original_value=snapshot,
+        corrected_value=snapshot,
+        note=None,
+    )
+    await send_message(chat_id, message_id, "✅ Kept.")
+
+
+async def _handle_discard(item_id: str, chat_id: int, message_id: int) -> None:
+    """Trash the item — status=discarded, write a discard correction."""
+    item = await asyncio.to_thread(fetch_item, supabase, item_id)
+    if not item:
+        await send_message(chat_id, message_id, "Item not found.")
+        return
+    await asyncio.to_thread(update_item_fields, supabase, item_id, status="discarded")
+    await asyncio.to_thread(
+        insert_correction,
+        supabase,
+        item_id=item_id,
+        correction_type="discard",
+        original_value=_classification_snapshot(item),
+        corrected_value={"status": "discarded"},
+        note=None,
+    )
+    await send_message(chat_id, message_id, "\U0001F5D1 Discarded.")
+
+
+async def _handle_mark_todo(item_id: str, chat_id: int, message_id: int) -> None:
+    """Force the item's type to todo and flip status to processed.
+
+    Doesn't push to Todoist here — the next /process picks it up if the
+    classifier is re-run, or Ryan adds the task manually. Keeps the triage
+    flow cheap and avoids side effects to Todoist on every tap.
+    """
+    item = await asyncio.to_thread(fetch_item, supabase, item_id)
+    if not item:
+        await send_message(chat_id, message_id, "Item not found.")
+        return
+    await asyncio.to_thread(
+        update_item_fields, supabase, item_id, type="todo", status="processed"
+    )
+    await asyncio.to_thread(
+        insert_correction,
+        supabase,
+        item_id=item_id,
+        correction_type="type",
+        original_value={"type": item.get("type")},
+        corrected_value={"type": "todo"},
+        note=None,
+    )
+    await send_message(
+        chat_id,
+        message_id,
+        "\U0001F4DD Marked as todo. (Not filed to Todoist yet — add manually or re-/process.)",
     )
 
 
