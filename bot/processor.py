@@ -32,6 +32,7 @@ from bot.filers import (
     write_obsidian_note,
 )
 from bot.llm import build_classifier_system_prompt, classify_item
+from bot.vision import refine_with_vision
 
 X_URL_RE = re.compile(r"https?://(?:x|twitter)\.com/[^\s]+", re.I)
 
@@ -303,6 +304,34 @@ def process_item(
         classification = classify_item(anthropic_client, system_blocks, payload)
         out["classification"] = classification
         out["api_cost_cents"] = classification.get("_cost_cents", 0)
+
+        # Phase B — second-pass vision for design+image items. Refines tags,
+        # visual_subtype, and summary by actually looking at the image. Skipped
+        # for any other project/type combo to keep cost discipline.
+        if (
+            classification.get("project") == "design"
+            and classification.get("type") == "image"
+            and item.get("media_dropbox_path")
+        ):
+            try:
+                image_bytes = _download_dropbox_bytes(dropbox_client, item["media_dropbox_path"])
+                refinement = refine_with_vision(
+                    anthropic_client,
+                    image_bytes=image_bytes,
+                    text_context=item.get("raw_text") or "",
+                    scraped_post_text=(scrape_info or {}).get("post_text", ""),
+                    prior_classification={"project": "design", "type": "image"},
+                )
+                if refinement is not None:
+                    if refinement.visual_subtype:
+                        classification["visual_subtype"] = refinement.visual_subtype
+                    if refinement.tags:
+                        classification["tags"] = refinement.tags
+                    if refinement.summary:
+                        classification["summary"] = refinement.summary
+                    out["api_cost_cents"] += refinement.cost_cents
+            except Exception as e:
+                logger.warning("vision refinement failed for item %s: %s", item.get("id"), e)
 
         new_media_path = item.get("media_dropbox_path")
         if item.get("media_dropbox_path") and item["media_type"] in ("image", "video", "voice"):

@@ -599,6 +599,174 @@ def test_process_item_does_not_overwrite_user_uploaded_media(mocker):
     download_mock.assert_not_called()
 
 
+def test_process_item_runs_vision_when_design_image(mocker):
+    """Design+image+media triggers two-pass vision; refinement merges into classification."""
+    from bot.vision import VisionRefinement
+
+    item = {
+        "id": "item-vis-1",
+        "media_type": "image",
+        "raw_text": "design inspo",
+        "media_dropbox_path": "/personal-os/_inbox/_attachments/item-vis-1.jpg",
+    }
+    mocker.patch("bot.processor.classify_item", return_value=_fake_classify_response(
+        "design", "image", ["initial-tag"], "initial summary"
+    ))
+    mocker.patch("bot.processor._download_dropbox_bytes", return_value=b"\xff\xd8\xff\xe0jpeg-bytes")
+    refine_mock = mocker.patch(
+        "bot.processor.refine_with_vision",
+        return_value=VisionRefinement(
+            visual_subtype="hero",
+            tags=["editorial", "warm-palette"],
+            summary="Editorial hero with warm beige.",
+            cost_cents=3,
+        ),
+    )
+    mocker.patch("bot.processor.write_obsidian_note", return_value="design/x.md")
+    mocker.patch("bot.processor.move_dropbox_media", return_value="/personal-os/design/_attachments/item-vis-1.jpg")
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+    )
+
+    refine_mock.assert_called_once()
+    assert result["classification"]["visual_subtype"] == "hero"
+    assert result["classification"]["tags"] == ["editorial", "warm-palette"]
+    assert result["classification"]["summary"] == "Editorial hero with warm beige."
+    # cost_cents from text (1) + vision (3) = 4
+    assert result["api_cost_cents"] == 4
+
+
+def test_process_item_skips_vision_when_not_design(mocker):
+    """Non-design items never trigger the vision pass."""
+    item = {
+        "id": "item-vis-2",
+        "media_type": "text",
+        "raw_text": "follow up with walmart",
+        "media_dropbox_path": None,
+    }
+    mocker.patch("bot.processor.classify_item", return_value=_fake_classify_response(
+        "acute", "todo", ["prospecting"], "Follow up with Walmart."
+    ))
+    refine_mock = mocker.patch("bot.processor.refine_with_vision")
+    mocker.patch("bot.processor.write_obsidian_note", return_value="acute/x.md")
+    mocker.patch("bot.processor.create_todoist_task", return_value="t-1")
+
+    process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={"acute": "1000001"},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+    )
+
+    refine_mock.assert_not_called()
+
+
+def test_process_item_skips_vision_when_design_but_no_media(mocker):
+    """A design+image classification with no media_dropbox_path can't run vision."""
+    item = {
+        "id": "item-vis-3",
+        "media_type": "text",
+        "raw_text": "design inspo I forgot to attach",
+        "media_dropbox_path": None,
+    }
+    mocker.patch("bot.processor.classify_item", return_value=_fake_classify_response(
+        "design", "image", ["x"], "y"
+    ))
+    refine_mock = mocker.patch("bot.processor.refine_with_vision")
+    mocker.patch("bot.processor.write_obsidian_note", return_value="design/x.md")
+
+    process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+    )
+
+    refine_mock.assert_not_called()
+
+
+def test_process_item_keeps_text_classification_when_vision_returns_none(mocker):
+    """If vision can't parse the response, the text-only classification is preserved."""
+    item = {
+        "id": "item-vis-4",
+        "media_type": "image",
+        "raw_text": "design",
+        "media_dropbox_path": "/personal-os/_inbox/_attachments/item-vis-4.jpg",
+    }
+    mocker.patch("bot.processor.classify_item", return_value=_fake_classify_response(
+        "design", "image", ["text-tag"], "text summary"
+    ))
+    mocker.patch("bot.processor._download_dropbox_bytes", return_value=b"fake")
+    mocker.patch("bot.processor.refine_with_vision", return_value=None)
+    mocker.patch("bot.processor.write_obsidian_note", return_value="design/x.md")
+    mocker.patch("bot.processor.move_dropbox_media", return_value="/personal-os/design/_attachments/item-vis-4.jpg")
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+    )
+
+    # Text-only fields preserved
+    assert result["classification"]["tags"] == ["text-tag"]
+    assert result["classification"]["summary"] == "text summary"
+    # No vision cost added
+    assert result["api_cost_cents"] == 1
+
+
+def test_process_item_continues_when_vision_raises(mocker):
+    """Vision exception (e.g., Dropbox 404 on download) must not fail the item."""
+    item = {
+        "id": "item-vis-5",
+        "media_type": "image",
+        "raw_text": "design",
+        "media_dropbox_path": "/personal-os/_inbox/_attachments/item-vis-5.jpg",
+    }
+    mocker.patch("bot.processor.classify_item", return_value=_fake_classify_response(
+        "design", "image", ["text-tag"], "text summary"
+    ))
+    mocker.patch("bot.processor._download_dropbox_bytes", side_effect=RuntimeError("dropbox 404"))
+    refine_mock = mocker.patch("bot.processor.refine_with_vision")
+    mocker.patch("bot.processor.write_obsidian_note", return_value="design/x.md")
+    mocker.patch("bot.processor.move_dropbox_media", return_value="/personal-os/design/_attachments/item-vis-5.jpg")
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+    )
+
+    refine_mock.assert_not_called()
+    assert result["status"] in ("processed", "needs_review")
+    assert result["classification"]["tags"] == ["text-tag"]
+
+
 def test_run_batch_fans_out_multi_image_scrape_into_additional_items(mocker):
     """Tweet with 3 images → 1 original item + 2 fan-out items, all processed in same batch."""
     original = {
