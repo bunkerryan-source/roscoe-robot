@@ -21,6 +21,7 @@ from bot.media import DropboxRefreshClient, download_from_telegram, upload_with_
 from bot.processor import run_batch
 from bot.scheduler import build_scheduler
 from bot.summary import build_evening_summary, build_morning_summary
+from bot.triage import build_review_keyboard
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -72,7 +73,13 @@ async def _send_morning_summary() -> None:
         )
         total_cost = sum((it.get("api_cost_cents") or 0) for it in items)
         text = build_morning_summary(items, total_cost)
-        await send_message(config.my_telegram_id, None, text)
+        needs_review = sum(1 for i in items if i.get("status") == "needs_review")
+        await send_message(
+            config.my_telegram_id,
+            None,
+            text,
+            reply_markup=build_review_keyboard(needs_review),
+        )
     except Exception:
         logger.exception("morning summary job failed")
 
@@ -85,7 +92,13 @@ async def _send_evening_summary() -> None:
         )
         total_cost = sum((it.get("api_cost_cents") or 0) for it in items)
         text = build_evening_summary(items, total_cost)
-        await send_message(config.my_telegram_id, None, text)
+        needs_review = sum(1 for i in items if i.get("status") == "needs_review")
+        await send_message(
+            config.my_telegram_id,
+            None,
+            text,
+            reply_markup=build_review_keyboard(needs_review),
+        )
     except Exception:
         logger.exception("evening summary job failed")
 
@@ -194,10 +207,18 @@ async def send_ack(chat_id: int, reply_to: int) -> None:
         logger.exception("ack failed for chat %s", chat_id)
 
 
-async def send_message(chat_id: int, reply_to: int | None, text: str) -> None:
+async def send_message(
+    chat_id: int,
+    reply_to: int | None,
+    text: str,
+    *,
+    reply_markup: dict | None = None,
+) -> None:
     payload: dict = {"chat_id": chat_id, "text": text}
     if reply_to is not None:
         payload["reply_to_message_id"] = reply_to
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     try:
         async with httpx.AsyncClient(timeout=10.0) as http:
             await http.post(
