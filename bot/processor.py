@@ -37,6 +37,15 @@ from bot.vision import refine_with_vision
 
 X_URL_RE = re.compile(r"https?://(?:x|twitter)\.com/[^\s]+", re.I)
 
+_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm")
+
+
+def _is_video_url(url: str | None) -> bool:
+    """Return True iff the URL path ends in a known video extension."""
+    if not url:
+        return False
+    return any(url.lower().endswith(ext) for ext in _VIDEO_EXTENSIONS)
+
 
 def extract_x_url(text: str | None) -> str | None:
     """Return the first X/Twitter URL in `text`, or None."""

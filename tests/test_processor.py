@@ -1138,3 +1138,16 @@ def test_run_batch_does_not_halt_when_below_cap(mocker):
     assert result["items_processed"] == 3
     assert result["halted_at_cap"] is False
     assert result["items_remaining_pending"] == 0
+
+
+def test_is_video_url_detects_known_extensions():
+    from bot.processor import _is_video_url
+
+    assert _is_video_url("https://video.twimg.com/abc.mp4") is True
+    assert _is_video_url("https://example.com/clip.MOV") is True
+    assert _is_video_url("https://cdn.example.com/v.webm") is True
+
+    assert _is_video_url("https://pbs.twimg.com/media/photo.jpg") is False
+    assert _is_video_url("https://video.twimg.com/playlist.m3u8") is False
+    assert _is_video_url("") is False
+    assert _is_video_url(None) is False
