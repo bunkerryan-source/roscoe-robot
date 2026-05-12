@@ -12,8 +12,13 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-from dotenv import load_dotenv
+# Make `bot/` importable when this script is run as scripts/triage_test.py —
+# Python only adds the script's own directory to sys.path, not the repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
