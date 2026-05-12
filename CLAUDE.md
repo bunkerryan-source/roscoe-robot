@@ -12,14 +12,17 @@ Read these in order before doing any non-trivial work:
 
 Don't duplicate the spec here; just pointer.
 
-## Current state — 2026-05-09
+## Current state — 2026-05-12
 
-**Session 3 (process pipeline) shipped.** `/process` is live in production. Telegram bot accepts captures, processor drains the queue via Anthropic Haiku 4.5 (with prompt caching), files to Obsidian + Todoist + Supabase. End-to-end smoke test passed: 3 items processed, 1 needs_review, $0.04, Todoist tasks created in correct projects.
+**Session 4 (vision + X scraper + daily summary + triage UI) shipped.** All four pieces live in production end-to-end:
+- **Apify X scraper** (Phase A) — `x.com` / `twitter.com` URLs now pull full text + images + author via Apify; fan-out children classified per image.
+- **Vision two-pass** (Phase B) — design+image items run a second-pass with Anthropic vision content blocks; cheap-by-default (only design type triggers it).
+- **APScheduler daily summaries** (Phase C) — 06:30 morning + 21:00 evening LA-local cron in the FastAPI lifespan. Brief is plain text grouped by project, with cost and needs_review counts.
+- **Triage UI** (Phase D) — Review button on each brief, four-button per-item keyboard (Keep / Refile / → Todo / Discard), refile project picker, auto-advance to next card after each tap, idempotency guard against double-taps. Each action writes a `corrections` row for the future learning pass.
 
-**Now: validation week.** Ryan runs `/process` daily on real captures. Each misclassification gets logged as a rule in `_meta/rules.md`. Goal is to gather correction data from real use before Session 4 begins. **Do not start Session 4 work without explicit instruction.**
+**Now: validation week resumes.** Same posture as after Session 3: Ryan triages real `needs_review` items via the inline-keyboard buttons, corrections rows accumulate, rules go into `_meta/rules.md` for systematic misclassifications. Do not start Session 5 without explicit instruction.
 
 **Next sessions (per spec):**
-- **Session 4** — Daily summary at 6:30/21:00 + B+ triage UI (inline keyboard), corrections table, vision wiring for image items, **Apify X scraper** in the enrichment layer (replaces failed OG fetch on `x.com`/`twitter.com` URLs; pulls full text + images + author). Adds `APIFY_API_TOKEN` to `.env`.
 - **Session 5** — Autonomy: cron on droplet, 12:00 PM silent run, daily cost cap.
 - **Session 6** — Weekly digest (Sonnet 4.6), monthly rule consolidation pass, research-thread clustering.
 - **Session 7** — `/find` polish, OA-wiki feeders, multi-source ingest.
@@ -28,7 +31,9 @@ Don't duplicate the spec here; just pointer.
 
 - **Capture:** forward/send anything to the Telegram bot. Bot acks with 👍 and writes to Supabase `items` (status=pending). No Claude call at this stage.
 - **Process:** in Telegram, send `/process`. Bot acks 👍, runs the batch in the background (≤50 items at a time), replies with `processed N · $X.XX · M needs review`.
-- **Review misclassifications:** open Obsidian vault `personal-os` — notes appear in `<project>/<YYYY-MM-DD>-<slug>.md`. If something's misfiled, edit `_meta/rules.md` in the git repo with the rule (e.g., "Tweets from @user X go to project Y"), commit, push, and redeploy.
+- **Daily briefs:** 06:30 LA (yesterday's totals) and 21:00 LA (today's totals) land in Telegram automatically. If any items are still in `needs_review` for that window, the brief carries a **Review N items** button.
+- **Triage:** tap the Review button to walk the queue. Each card shows the bot's current project/type/summary and the original text. Four buttons — **✅ Keep** (approve), **📂 Refile** (opens a project picker), **📝 → Todo** (force `type=todo`; not pushed to Todoist), **🗑 Discard** (status=discarded). Each tap auto-advances to the next card; every action writes a `corrections` row for the learning pass.
+- **Review misclassifications offline:** open Obsidian vault `personal-os` — notes appear in `<project>/<YYYY-MM-DD>-<slug>.md`. Systemic misfilings still belong in `_meta/rules.md` (commit, push, redeploy).
 - **Vault location:** `Dropbox (Personal)\Apps\roscoe-robot\personal-os\` (App-folder-scoped Dropbox token). Obsidian opens this exact path as a vault — Obsidian Sync is OFF; Dropbox is the only sync layer.
 
 ## Key invariants (don't violate without discussion)
@@ -39,6 +44,8 @@ Don't duplicate the spec here; just pointer.
 - **Classifier output parsing must tolerate markdown fences.** Haiku 4.5 wraps JSON in ` ```json ... ``` ` even when the prompt forbids it. `bot/llm.py:_extract_json` strips fences and falls back to first `{...}` regex. Reuse this helper for any new LLM-output parser.
 - **Per-item failures must not kill the batch.** `process_item` never raises; failures land in the result dict and the run continues.
 - **Capture layer never calls Claude.** Telegram → Supabase + Dropbox only. No classification at intake.
+- **Triage handlers must be idempotent.** Each terminal handler (`_handle_keep` / `_discard` / `_mark_todo` / `_set_project`) checks `item.status == 'needs_review'` and bails silently if not — Telegram retries and double-taps would otherwise duplicate corrections rows. The shared guard is `_load_for_triage` in `bot/main.py`.
+- **Status values are constraint-enforced.** Postgres `items_status_check` allows `pending / processed / needs_review / failed / discarded`. Adding a new status requires a new file in `migrations/` and a manual paste into Supabase SQL Editor (no migration runner in the repo).
 
 ## Production environment
 
@@ -58,16 +65,14 @@ ssh root@64.23.170.115 'journalctl -u personal-os-v2 -n 50 --no-pager'   # check
 
 ## Development workflow
 
-- **TDD throughout.** New behavior gets a failing test first; tests live in `tests/`. Run with `pytest -q`. Current count: 85 passing.
+- **TDD throughout.** New behavior gets a failing test first; tests live in `tests/`. Run with `pytest -q`. Current count: 185 passing.
 - **No new files at repo root** beyond what's already there. New code goes in `bot/` (runtime), `tests/` (tests), or `docs/superpowers/{specs,plans}/` (design docs).
 - **Plans go under `docs/superpowers/plans/`** with filename `YYYY-MM-DD-session-N-<slug>.md`. Specs are in `docs/superpowers/specs/`. Don't recreate `spec.md` at root — it was deliberately removed (see commit `8e5e271`).
 - **Commit style** mirrors existing log: `feat(session-N): ...` / `fix(session-N): ...` / `refactor(session-N): ...` / `docs(plan|spec): ...`. Sign commits with `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
 
 ## Things that are NOT done yet
 
-- **Vision (image classification).** Image-only items currently get `needs_review` because the classifier can't see them. Wired in Session 4.
-- **X / Twitter scraping.** OG fetch on `x.com` URLs returns nothing because Twitter blocks unauthenticated scrapers. X URLs without user-typed context land in `needs_review`. Apify scraper added in Session 4 will close this gap. Until then, capture habit is: paste tweet text or screenshot the image with a descriptive caption (see operator runbook).
 - **Voice transcription on droplet.** Code path is built (`transcribe_voice` in `bot/enrichment.py`) but unverified end-to-end on droplet — no real voice memo has been processed yet.
 - **Cron / autonomy.** `/process` is manual only. Session 5 adds the 12:00 PM silent run and daily cost cap.
 - **`/find` retrieval.** No retrieval surface yet beyond Obsidian native search and Supabase queries. Session 7.
-- **Daily summary + triage UI.** Session 4 builds this.
+- **Mark-as-Todo doesn't push to Todoist.** The 📝 triage button flips `type=todo` and writes a correction, but does NOT call the Todoist API — Ryan adds the task manually or re-runs `/process`. Intentional cost discipline; can be revisited if the manual step becomes friction.
