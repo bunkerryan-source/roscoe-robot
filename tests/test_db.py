@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 from bot.db import (
     fetch_pending_items,
     fetch_recent_corrections,
+    get_source_post_by_id,
     get_source_post_by_url,
     insert_correction,
     insert_item,
@@ -198,6 +199,27 @@ def test_get_source_post_by_url_returns_none_when_missing():
     mock_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
 
     result = get_source_post_by_url(mock_client, "https://x.com/u/status/missing")
+
+    assert result is None
+
+
+def test_get_source_post_by_id_returns_row_when_present():
+    mock_client = MagicMock()
+    row = {"id": "sp-7", "source_url": "https://x.com/u/status/7", "post_text": "hello", "image_urls": ["a.jpg"]}
+    mock_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [row]
+
+    result = get_source_post_by_id(mock_client, "sp-7")
+
+    mock_client.table.assert_called_with("source_posts")
+    mock_client.table.return_value.select.return_value.eq.assert_called_with("id", "sp-7")
+    assert result == row
+
+
+def test_get_source_post_by_id_returns_none_when_missing():
+    mock_client = MagicMock()
+    mock_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+
+    result = get_source_post_by_id(mock_client, "sp-missing")
 
     assert result is None
 

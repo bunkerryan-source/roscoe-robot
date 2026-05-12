@@ -16,6 +16,7 @@ from bot import scraper
 from bot.db import (
     fetch_pending_items,
     fetch_recent_corrections,
+    get_source_post_by_id,
     get_source_post_by_url,
     insert_run,
     insert_source_post,
@@ -246,39 +247,55 @@ def process_item(
         # Phase A — X URL scrape (Session 4). Runs before enrichment so the
         # scraped post text can be passed into the classifier payload, and
         # multi-image fan-out can be deferred to run_batch.
+        #
+        # Two paths:
+        # 1. Fresh capture (no source_post_id yet) — detect X URL, scrape live
+        #    (or hit cache), set out["scrape_info"] so run_batch will fan-out
+        #    additional images.
+        # 2. Fan-out child (source_post_id already set) — load cached post_text
+        #    from source_posts so the classifier sees the same context as the
+        #    parent. DO NOT set out["scrape_info"]: run_batch keys on that to
+        #    decide fan-out, and children must not re-fan-out (would infinite
+        #    loop).
         scrape_info = None
-        # Skip if item is already a fan-out child of a prior scrape. Without
-        # this guard, the child re-detects the X URL in its inherited raw_text,
-        # cache-hits the same source_post, and run_batch fans out N-1 more
-        # children — an unbounded loop.
-        x_url = (
-            extract_x_url(item.get("raw_text", ""))
-            if not item.get("source_post_id")
-            else None
-        )
-        if x_url and supabase_client is not None and apify_api_token:
+        if item.get("source_post_id") and supabase_client is not None:
             try:
-                scrape_info = handle_x_url(
-                    supabase_client, x_url,
-                    token=apify_api_token,
-                    actor=apify_tweet_scraper_actor or "xquik~x-tweet-scraper",
-                )
-                out["source_post_id"] = scrape_info["source_post_id"]
-                out["scrape_info"] = scrape_info
-                # Download first image only if the item doesn't already carry user-uploaded media.
-                if scrape_info["image_urls"] and not item.get("media_dropbox_path"):
-                    first_img = scrape_info["image_urls"][0]
-                    staged = _download_image_to_dropbox(
-                        dropbox_client, first_img, item["id"],
-                        index=0, vault_root=vault_root, project="_inbox",
-                    )
-                    item["media_dropbox_path"] = staged
-                    item["media_type"] = "image"
-                    out["media_dropbox_path"] = staged
-            except scraper.ScraperError as e:
-                logger.warning("X scrape failed for %s: %s — falling back to bare URL", x_url, e)
+                sp = get_source_post_by_id(supabase_client, item["source_post_id"])
+                if sp:
+                    scrape_info = {
+                        "source_post_id": sp["id"],
+                        "post_text": sp.get("post_text") or "",
+                        "midjourney_params": sp.get("midjourney_params") or {},
+                        "image_urls": sp.get("image_urls") or [],
+                    }
+                    out["source_post_id"] = sp["id"]
             except Exception as e:
-                logger.warning("X scrape unexpected error for %s: %s — falling back", x_url, e)
+                logger.warning("source_post lookup failed for item %s: %s", item.get("id"), e)
+        else:
+            x_url = extract_x_url(item.get("raw_text", ""))
+            if x_url and supabase_client is not None and apify_api_token:
+                try:
+                    scrape_info = handle_x_url(
+                        supabase_client, x_url,
+                        token=apify_api_token,
+                        actor=apify_tweet_scraper_actor or "xquik~x-tweet-scraper",
+                    )
+                    out["source_post_id"] = scrape_info["source_post_id"]
+                    out["scrape_info"] = scrape_info
+                    # Download first image only if the item doesn't already carry user-uploaded media.
+                    if scrape_info["image_urls"] and not item.get("media_dropbox_path"):
+                        first_img = scrape_info["image_urls"][0]
+                        staged = _download_image_to_dropbox(
+                            dropbox_client, first_img, item["id"],
+                            index=0, vault_root=vault_root, project="_inbox",
+                        )
+                        item["media_dropbox_path"] = staged
+                        item["media_type"] = "image"
+                        out["media_dropbox_path"] = staged
+                except scraper.ScraperError as e:
+                    logger.warning("X scrape failed for %s: %s — falling back to bare URL", x_url, e)
+                except Exception as e:
+                    logger.warning("X scrape unexpected error for %s: %s — falling back", x_url, e)
 
         payload, _needs_vision = enrich_item(
             item,

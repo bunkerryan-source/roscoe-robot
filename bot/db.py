@@ -126,6 +126,20 @@ def get_source_post_by_url(client, source_url: str) -> dict | None:
     return rows[0] if rows else None
 
 
+def get_source_post_by_id(client, source_post_id: str) -> dict | None:
+    """Return source_posts row by id, or None. Used by fan-out children to
+    load cached post_text without re-scraping."""
+    response = (
+        client.table("source_posts")
+        .select("*")
+        .eq("id", source_post_id)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0] if rows else None
+
+
 def insert_source_post(
     client,
     *,

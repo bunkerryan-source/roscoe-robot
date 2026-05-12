@@ -502,6 +502,7 @@ def test_process_item_skips_scrape_when_item_is_fanout_child(mocker):
         "source_post_id": "sp-already-set",
     }
     handle_mock = mocker.patch("bot.processor.handle_x_url")
+    mocker.patch("bot.processor.get_source_post_by_id", return_value=None)
     mocker.patch("bot.processor.classify_item", return_value=_fake_classify_response(
         "design", "image", [], "image from a tweet"
     ))
@@ -525,6 +526,89 @@ def test_process_item_skips_scrape_when_item_is_fanout_child(mocker):
     handle_mock.assert_not_called()
     assert result["scrape_info"] is None
     # run_batch keys on scrape_info to decide whether to fan out; None means no fan-out.
+
+
+def test_process_item_loads_source_post_context_for_fanout_child(mocker):
+    """Fan-out children must load cached post_text so the classifier sees the
+    same context as the parent — otherwise they mis-classify as random links."""
+    item = {
+        "id": "fanout-child-2",
+        "media_type": "image",
+        "raw_text": "https://x.com/midlibrary_io/status/123",
+        "media_dropbox_path": "/personal-os/_inbox/_attachments/fanout-child-2-1.jpg",
+        "source_post_id": "sp-parent",
+    }
+    lookup_mock = mocker.patch(
+        "bot.processor.get_source_post_by_id",
+        return_value={
+            "id": "sp-parent",
+            "post_text": "warm beige editorial hero --sref 999",
+            "midjourney_params": {"sref": "999"},
+            "image_urls": ["a.jpg", "b.jpg", "c.jpg", "d.jpg"],
+        },
+    )
+    classify_mock = mocker.patch("bot.processor.classify_item", return_value=_fake_classify_response(
+        "design", "image", ["hero"], "design hero"
+    ))
+    mocker.patch("bot.processor.write_obsidian_note", return_value="design/x.md")
+    mocker.patch("bot.processor.move_dropbox_media", return_value="/personal-os/design/_attachments/fanout-child-2.jpg")
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+        supabase_client=MagicMock(),
+        apify_api_token="apify_token",
+    )
+
+    lookup_mock.assert_called_once()
+    # Classifier payload should now include the scraped post text
+    payload_arg = classify_mock.call_args.args[2]
+    assert "warm beige editorial" in payload_arg
+    # But out["scrape_info"] must stay None — otherwise run_batch fans out again
+    assert result["scrape_info"] is None
+    # source_post_id still propagated so update_classified writes it through
+    assert result["source_post_id"] == "sp-parent"
+
+
+def test_process_item_fanout_child_handles_missing_source_post(mocker):
+    """If get_source_post_by_id returns None, the item still classifies (text-only)."""
+    item = {
+        "id": "fanout-child-3",
+        "media_type": "image",
+        "raw_text": "https://x.com/u/status/xx",
+        "media_dropbox_path": "/personal-os/_inbox/_attachments/fanout-child-3-1.jpg",
+        "source_post_id": "sp-deleted",
+    }
+    mocker.patch("bot.processor.get_source_post_by_id", return_value=None)
+    handle_mock = mocker.patch("bot.processor.handle_x_url")
+    mocker.patch("bot.processor.classify_item", return_value=_fake_classify_response(
+        "personal", "image", [], "x"
+    ))
+    mocker.patch("bot.processor.write_obsidian_note", return_value="personal/x.md")
+    mocker.patch("bot.processor.move_dropbox_media")
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+        supabase_client=MagicMock(),
+        apify_api_token="apify_token",
+    )
+
+    handle_mock.assert_not_called()
+    assert result["scrape_info"] is None
+    assert result["status"] in ("processed", "needs_review")
 
 
 def test_process_item_continues_when_scraper_errors(mocker):
