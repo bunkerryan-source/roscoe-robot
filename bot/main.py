@@ -21,7 +21,7 @@ from bot.media import DropboxRefreshClient, download_from_telegram, upload_with_
 from bot.processor import run_batch
 from bot.scheduler import build_scheduler
 from bot.summary import build_evening_summary, build_morning_summary
-from bot.triage import build_review_keyboard
+from bot.triage import build_review_keyboard, parse_callback_data
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -136,6 +136,26 @@ async def webhook(secret: str, request: Request, background_tasks: BackgroundTas
 
     update = await request.json()
 
+    if "callback_query" in update:
+        cb = update["callback_query"]
+        cb_sender_id = (cb.get("from") or {}).get("id")
+        if cb_sender_id != config.my_telegram_id:
+            logger.info("dropping callback_query from unauthorized sender id=%s", cb_sender_id)
+            return {"ok": True}
+        action, payload = parse_callback_data(cb.get("data") or "")
+        cb_message = cb.get("message") or {}
+        chat_id = (cb_message.get("chat") or {}).get("id")
+        message_id = cb_message.get("message_id")
+        background_tasks.add_task(
+            _handle_triage_callback,
+            action=action,
+            payload=payload,
+            chat_id=chat_id,
+            message_id=message_id,
+            callback_id=cb["id"],
+        )
+        return {"ok": True}
+
     msg = update.get("message") or update.get("channel_post") or {}
     sender_id = (msg.get("from") or {}).get("id")
     if sender_id != config.my_telegram_id:
@@ -227,6 +247,40 @@ async def send_message(
             )
     except Exception:
         logger.exception("send_message failed for chat %s", chat_id)
+
+
+async def _answer_callback_query(callback_id: str) -> None:
+    """Clear Telegram's loading spinner on an inline-keyboard tap.
+
+    Telegram retries the callback if we don't answer within ~10s, so this
+    runs first regardless of how the action itself resolves.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            await http.post(
+                f"https://api.telegram.org/bot{config.bot_token}/answerCallbackQuery",
+                json={"callback_query_id": callback_id},
+            )
+    except Exception:
+        logger.exception("answerCallbackQuery failed for cb %s", callback_id)
+
+
+async def _handle_triage_callback(
+    *,
+    action: str,
+    payload: str,
+    chat_id: int,
+    message_id: int,
+    callback_id: str,
+) -> None:
+    """Dispatch a callback_query to the matching triage handler.
+
+    Always answers the callback first so the Telegram client clears its
+    spinner — handlers can fail without leaving a stuck UI.
+    """
+    await _answer_callback_query(callback_id)
+    logger.info("triage callback action=%s payload=%s", action, payload)
+    # Real action branches are wired in subsequent Phase D tasks (D3-D5).
 
 
 async def _run_batch_and_reply(chat_id: int, reply_to: int) -> None:

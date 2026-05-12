@@ -157,6 +157,70 @@ def test_process_command_schedules_run_batch(client, load_fixture, mocker):
     run_batch_mock.assert_called_once()
 
 
+def test_webhook_routes_callback_query_to_dispatcher(client, mocker):
+    test_client, _ = client
+    handler = mocker.patch("bot.main._handle_triage_callback")
+    response = test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 1,
+            "callback_query": {
+                "id": "cb-1",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 99},
+                "data": "keep:item-uuid",
+            },
+        },
+    )
+    assert response.status_code == 200
+    handler.assert_called_once()
+    kwargs = handler.call_args.kwargs
+    assert kwargs["action"] == "keep"
+    assert kwargs["payload"] == "item-uuid"
+    assert kwargs["callback_id"] == "cb-1"
+    assert kwargs["chat_id"] == 12345
+    assert kwargs["message_id"] == 99
+
+
+def test_webhook_drops_callback_query_from_unauthorized_sender(client, mocker):
+    test_client, _ = client
+    handler = mocker.patch("bot.main._handle_triage_callback")
+    response = test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 2,
+            "callback_query": {
+                "id": "cb-2",
+                "from": {"id": 99999},
+                "message": {"chat": {"id": 99999}, "message_id": 1},
+                "data": "discard:x",
+            },
+        },
+    )
+    assert response.status_code == 200
+    handler.assert_not_called()
+
+
+def test_webhook_callback_query_setproj_payload_keeps_inner_colon(client, mocker):
+    test_client, _ = client
+    handler = mocker.patch("bot.main._handle_triage_callback")
+    test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 3,
+            "callback_query": {
+                "id": "cb-3",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 7},
+                "data": "setproj:item-abc:design",
+            },
+        },
+    )
+    kwargs = handler.call_args.kwargs
+    assert kwargs["action"] == "setproj"
+    assert kwargs["payload"] == "item-abc:design"
+
+
 def test_process_command_replies_with_summary(client, load_fixture, mocker):
     test_client, _ = client
     mocker.patch(
