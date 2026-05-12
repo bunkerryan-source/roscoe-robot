@@ -64,16 +64,30 @@ def test_fetch_tweet_raises_on_http_error():
 
 
 @respx.mock
-def test_fetch_tweet_skips_video_only_media():
+def test_fetch_tweet_extracts_video_url_from_video_info_variants():
     respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[{
         "url": "https://x.com/user/status/123",
-        "text": "video",
+        "text": "video post",
         "author": {"username": "user", "name": "U"},
         "createdAt": "2026-05-10T12:00:00.000Z",
-        "media": [{"type": "video", "media_url_https": "https://video.twimg.com/x.mp4"}],
+        "media": [{
+            "type": "video",
+            "media_url_https": "https://pbs.twimg.com/amplify_video_thumb/x/img/thumb.jpg",
+            "video_info": {
+                "duration_millis": 12345,
+                "variants": [
+                    {"content_type": "video/mp4", "bitrate": 256000,
+                     "url": "https://video.twimg.com/amplify_video/x/vid/240x240/lo.mp4"},
+                    {"content_type": "video/mp4", "bitrate": 832000,
+                     "url": "https://video.twimg.com/amplify_video/x/vid/720x720/hi.mp4"},
+                    {"content_type": "application/x-mpegURL",
+                     "url": "https://video.twimg.com/amplify_video/x/pl/master.m3u8"},
+                ]
+            }
+        }],
     }]))
     result = fetch_tweet("https://x.com/user/status/123", token="t", actor="xquik~x-tweet-scraper")
-    assert result.image_urls == []  # only photos extracted
+    assert result.image_urls == ["https://video.twimg.com/amplify_video/x/vid/720x720/hi.mp4"]
 
 
 @respx.mock
