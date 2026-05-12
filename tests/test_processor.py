@@ -1260,7 +1260,7 @@ def test_process_item_with_x_video_url_downloads_video_and_marks_type(mocker):
 def test_fan_out_skips_video_urls(mocker):
     from bot.processor import _fan_out_additional_items_from_scrape
 
-    inserted_rows = [{"id": "child-B"}]  # only B should fan out (A is parent, C is video)
+    inserted_rows = [{"id": "child-B"}, {"id": "child-C"}]  # C entry lets .mp4 reach image_download when guard is absent
     insert_iter = iter(inserted_rows)
 
     mock_supabase = MagicMock()
@@ -1299,3 +1299,6 @@ def test_fan_out_skips_video_urls(mocker):
     assert new_items[0]["media_dropbox_path"].endswith(".jpg")
     assert image_download.call_count == 1
     assert image_download.call_args.args[1] == "https://pbs.twimg.com/media/B.jpg"
+    # Ensure the .mp4 URL was never passed to the image helper, even by exception masking.
+    all_call_urls = [c.args[1] for c in image_download.call_args_list]
+    assert "https://video.twimg.com/clip.mp4" not in all_call_urls
