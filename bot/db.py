@@ -102,6 +102,24 @@ def insert_run(
     return response.data[0]
 
 
+def fetch_items_for_summary(client, *, since: str, until: str) -> list[dict]:
+    """Return items processed in the window [since, until) for daily summaries.
+
+    `since` and `until` are UTC ISO 8601 strings. Filters on `processed_at` so
+    only items that actually finished classification are counted — pending or
+    failed items don't pollute the brief.
+    """
+    response = (
+        client.table("items")
+        .select("id, project, type, status, summary, api_cost_cents, processed_at")
+        .gte("processed_at", since)
+        .lt("processed_at", until)
+        .order("processed_at")
+        .execute()
+    )
+    return response.data or []
+
+
 def fetch_recent_corrections(client, limit: int = 30) -> list[dict]:
     response = (
         client.table("corrections")

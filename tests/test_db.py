@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 from bot.db import (
+    fetch_items_for_summary,
     fetch_pending_items,
     fetch_recent_corrections,
     get_source_post_by_id,
@@ -222,6 +223,29 @@ def test_get_source_post_by_id_returns_none_when_missing():
     result = get_source_post_by_id(mock_client, "sp-missing")
 
     assert result is None
+
+
+def test_fetch_items_for_summary_filters_on_processed_at_window():
+    mock_client = MagicMock()
+    chain = mock_client.table.return_value.select.return_value
+    chain.gte.return_value.lt.return_value.order.return_value.execute.return_value.data = [
+        {"id": "a", "project": "design", "type": "image", "status": "processed"},
+        {"id": "b", "project": "acute", "type": "todo", "status": "processed"},
+    ]
+
+    result = fetch_items_for_summary(
+        mock_client,
+        since="2026-05-11T00:00:00+00:00",
+        until="2026-05-12T00:00:00+00:00",
+    )
+
+    mock_client.table.assert_called_with("items")
+    select_arg = mock_client.table.return_value.select.call_args.args[0]
+    for col in ("project", "type", "status", "summary", "api_cost_cents", "processed_at"):
+        assert col in select_arg
+    chain.gte.assert_called_with("processed_at", "2026-05-11T00:00:00+00:00")
+    chain.gte.return_value.lt.assert_called_with("processed_at", "2026-05-12T00:00:00+00:00")
+    assert len(result) == 2
 
 
 def test_insert_source_post_returns_inserted_id_and_writes_all_fields():

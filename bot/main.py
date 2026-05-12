@@ -1,7 +1,9 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import anthropic
 import httpx
@@ -13,10 +15,12 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 load_dotenv()
 
 from bot.config import Config
-from bot.db import get_client, insert_item, update_media_path
+from bot.db import fetch_items_for_summary, get_client, insert_item, update_media_path
 from bot.intake import parse_update
 from bot.media import DropboxRefreshClient, download_from_telegram, upload_with_fallback
 from bot.processor import run_batch
+from bot.scheduler import build_scheduler
+from bot.summary import build_evening_summary, build_morning_summary
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -36,7 +40,75 @@ _TAG_VOCAB_PATH = Path("_meta/tag_vocab.md")
 RULES_MD = _RULES_PATH.read_text(encoding="utf-8") if _RULES_PATH.exists() else ""
 TAG_VOCAB_MD = _TAG_VOCAB_PATH.read_text(encoding="utf-8") if _TAG_VOCAB_PATH.exists() else ""
 
-app = FastAPI()
+LA = ZoneInfo("America/Los_Angeles")
+
+
+def _utc_window_for_yesterday_la() -> tuple[str, str]:
+    """Return (since_utc_iso, until_utc_iso) bounding yesterday in LA local time."""
+    now_la = datetime.now(LA)
+    today_start_la = now_la.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start_la = today_start_la - timedelta(days=1)
+    return (
+        yesterday_start_la.astimezone(timezone.utc).isoformat(),
+        today_start_la.astimezone(timezone.utc).isoformat(),
+    )
+
+
+def _utc_window_for_today_la() -> tuple[str, str]:
+    """Return (since_utc_iso, until_utc_iso) bounding today-so-far in LA local time."""
+    now_la = datetime.now(LA)
+    start_la = now_la.replace(hour=0, minute=0, second=0, microsecond=0)
+    return (
+        start_la.astimezone(timezone.utc).isoformat(),
+        now_la.astimezone(timezone.utc).isoformat(),
+    )
+
+
+async def _send_morning_summary() -> None:
+    try:
+        since, until = _utc_window_for_yesterday_la()
+        items = await asyncio.to_thread(
+            fetch_items_for_summary, supabase, since=since, until=until
+        )
+        total_cost = sum((it.get("api_cost_cents") or 0) for it in items)
+        text = build_morning_summary(items, total_cost)
+        await send_message(config.my_telegram_id, None, text)
+    except Exception:
+        logger.exception("morning summary job failed")
+
+
+async def _send_evening_summary() -> None:
+    try:
+        since, until = _utc_window_for_today_la()
+        items = await asyncio.to_thread(
+            fetch_items_for_summary, supabase, since=since, until=until
+        )
+        total_cost = sum((it.get("api_cost_cents") or 0) for it in items)
+        text = build_evening_summary(items, total_cost)
+        await send_message(config.my_telegram_id, None, text)
+    except Exception:
+        logger.exception("evening summary job failed")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    scheduler = build_scheduler(
+        morning_job=_send_morning_summary,
+        evening_job=_send_evening_summary,
+        timezone="America/Los_Angeles",
+    )
+    scheduler.start()
+    logger.info(
+        "APScheduler started — jobs: %s",
+        [(j.id, str(j.next_run_time)) for j in scheduler.get_jobs()],
+    )
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=False)
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/healthz")
@@ -122,16 +194,15 @@ async def send_ack(chat_id: int, reply_to: int) -> None:
         logger.exception("ack failed for chat %s", chat_id)
 
 
-async def send_message(chat_id: int, reply_to: int, text: str) -> None:
+async def send_message(chat_id: int, reply_to: int | None, text: str) -> None:
+    payload: dict = {"chat_id": chat_id, "text": text}
+    if reply_to is not None:
+        payload["reply_to_message_id"] = reply_to
     try:
         async with httpx.AsyncClient(timeout=10.0) as http:
             await http.post(
                 f"https://api.telegram.org/bot{config.bot_token}/sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": text,
-                    "reply_to_message_id": reply_to,
-                },
+                json=payload,
             )
     except Exception:
         logger.exception("send_message failed for chat %s", chat_id)
