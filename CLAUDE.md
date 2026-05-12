@@ -23,11 +23,11 @@ Don't duplicate the spec here; just pointer.
 
 Smoke test on the droplet: a manual `_noon_cron()` against production state processed 2 X-URL items end-to-end (Apify → vision → Dropbox → Supabase), wrote a `runs` row with `trigger='scheduled-1200'`, no Telegram message — exactly the silent-success contract.
 
-**Now: validation week #3 — let cron live.** Watch a few full days of autonomous runs. If 200¢ feels too loose or too tight, tune `DAILY_COST_CAP_CENTS` on the droplet (no code change). Do not start Session 6 without explicit instruction.
+**Now: validation week #3 — let cron live.** Watch a few full days of autonomous runs. If 200¢ feels too loose or too tight, tune `DAILY_COST_CAP_CENTS` on the droplet (no code change). Do not start Session 7 without explicit instruction.
 
 **Next sessions (per spec):**
-- **Session 6** — Weekly digest (Sonnet 4.6), monthly rule consolidation, research-thread clustering. **Plan drafted at [docs/superpowers/plans/2026-05-12-session-6-weekly-digest-rules.md](docs/superpowers/plans/2026-05-12-session-6-weekly-digest-rules.md); two open decisions deferred to implementation start (rule-proposal UX, vault rules.md repo sync).**
-- **Session 7** — `/find` polish, OA-wiki feeders, multi-source ingest.
+- **Session 7** — Weekly digest (Sonnet 4.6), monthly rule consolidation, research-thread clustering. **Plan drafted at [docs/superpowers/plans/2026-05-12-session-7-weekly-digest-rules.md](docs/superpowers/plans/2026-05-12-session-7-weekly-digest-rules.md); two open decisions deferred to implementation start (rule-proposal UX, vault rules.md repo sync).**
+- **Session 8** — `/find` polish, OA-wiki feeders, multi-source ingest.
 
 **Related sibling project:** [../design-dashboard/](../design-dashboard/) — Pinterest-style web viewer for design images this bot captures. Read-only consumer of this project's Supabase + Dropbox. Independent code path / deploy; can be built in parallel with Sessions 6–7.
 
@@ -80,6 +80,6 @@ ssh root@64.23.170.115 'journalctl -u personal-os-v2 -n 50 --no-pager'   # check
 ## Things that are NOT done yet
 
 - **Voice transcription on droplet.** Code path is built (`transcribe_voice` in `bot/enrichment.py`) but unverified end-to-end on droplet — no real voice memo has been processed yet.
-- **`/find` retrieval.** No retrieval surface yet beyond Obsidian native search and Supabase queries. Session 7.
+- **`/find` retrieval.** No retrieval surface yet beyond Obsidian native search and Supabase queries. Session 8.
 - **Mark-as-Todo doesn't push to Todoist.** The 📝 triage button flips `type=todo` and writes a correction, but does NOT call the Todoist API — Ryan adds the task manually or re-runs `/process`. Intentional cost discipline; can be revisited if the manual step becomes friction.
-- **Weekly digest + monthly rule consolidation.** Session 6 — Sonnet 4.6 weekly summary on Saturdays, automatic rule pass once a month, research-thread clustering.
+- **Weekly digest + monthly rule consolidation.** Session 7 — Sonnet 4.6 weekly summary on Saturdays, automatic rule pass once a month, research-thread clustering.

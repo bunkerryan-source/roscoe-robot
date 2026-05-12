@@ -1,10 +1,10 @@
-# Session 6 — Weekly Digest + Research Threads + Monthly Rule Pass
+# Session 7 — Weekly Digest + Research Threads + Monthly Rule Pass
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the system from write-only to read-back. Once a week (Saturday 07:00 LA) the bot reads the week's captures and ships a Sonnet-generated digest with a watchlist + 1–3 research-thread suggestions; tap a suggestion and Sonnet writes a synthesizing note into `_meta/research-threads/`. Once a month (day 1, 07:00 LA) the bot reads the prior month's `corrections` and proposes durable rule additions to `_meta/rules.md`, one Telegram Yes/No tap per proposal.
 
-**Architecture:** Reuses Session 5's APScheduler + cron-coro pattern. Two new cron coros (`_weekly_digest_cron`, `_monthly_rules_cron`) registered in lifespan alongside the daily three. Sonnet 4.6 (`claude-sonnet-4-6`) used for all three Session 6 LLM calls; reads cost ~$0.25/month at projected volume. Suggestions and proposals persist in a single polymorphic `lm_proposals` table so callback handlers can recover them by id (Telegram's 64-byte `callback_data` cap forces this — UUIDs in callbacks, payload in DB). Research-thread notes write to the Dropbox-resident vault using the existing `upload_with_fallback` filer.
+**Architecture:** Reuses Session 5's APScheduler + cron-coro pattern. Two new cron coros (`_weekly_digest_cron`, `_monthly_rules_cron`) registered in lifespan alongside the daily three. Sonnet 4.6 (`claude-sonnet-4-6`) used for all three Session 7 LLM calls; reads cost ~$0.25/month at projected volume. Suggestions and proposals persist in a single polymorphic `lm_proposals` table so callback handlers can recover them by id (Telegram's 64-byte `callback_data` cap forces this — UUIDs in callbacks, payload in DB). Research-thread notes write to the Dropbox-resident vault using the existing `upload_with_fallback` filer.
 
 **Tech Stack:** Existing Python 3.11+ stack. Anthropic SDK already configured for Haiku — same client gets reused with the Sonnet model ID. APScheduler 3.10+ already a dependency. Tests: pytest, pytest-asyncio, pytest-mock, respx.
 
@@ -16,8 +16,8 @@ Implements the **Session 6** entry of the [design spec](../specs/2026-05-05-pers
 
 What this session does **not** ship (deferred per spec):
 
-- `/find` Telegram retrieval → Session 7.
-- OA-wiki feeders / forwarded-email / browser-extension ingest → Session 7.
+- `/find` Telegram retrieval → Session 8.
+- OA-wiki feeders / forwarded-email / browser-extension ingest → Session 8.
 - Git auto-push from droplet for vault `_meta/rules.md` changes → see Decision 6 below; punted to a follow-up.
 
 What this session **does** ship:
@@ -82,7 +82,7 @@ If you want to swap any of these, edit this section before starting Task 1.
 - [ ] **P1: Session 5 has been live on the droplet for at least a few days.** Per CLAUDE.md's standing instruction, don't start the next session until the previous one's been observed for a week of real usage. Confirm there's enough natural cron-fire history in `runs` (at least one of each of `scheduled-630`, `scheduled-1200`, `scheduled-2100`) before starting.
 - [ ] **P2: Confirm Anthropic API key has Sonnet access.** Same key as Haiku; if billing tier was provisioned for Haiku-only, Sonnet calls 4xx. Run a one-off probe from the droplet: `PYTHONPATH=/opt/personal-os-v2 venv/bin/python -c "import anthropic, os; from dotenv import load_dotenv; load_dotenv('/opt/personal-os-v2/.env'); c = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY']); print(c.messages.create(model='claude-sonnet-4-6', max_tokens=20, messages=[{'role':'user','content':'reply with the word OK'}]).content[0].text)"` — expect to see "OK".
 - [ ] **P3: Confirm `_meta/research-threads/` will be created on first write.** The vault uploader (`upload_with_fallback` in `bot/media.py`) creates parent paths implicitly via Dropbox `files/upload`; no manual mkdir needed. Sanity-check that no file exists at that path yet so the first write isn't an unintended overwrite.
-- [ ] **P4: Create branch** — `git checkout -b session-6` from current `main`.
+- [ ] **P4: Create branch** — `git checkout -b session-7` from current `main`.
 - [ ] **P5: Decide on first-run dates.** Day-1-of-month firing means May 12 is mid-cycle — the first real monthly run will be June 1. Saturday firing means the first real weekly digest will land on the Saturday after deploy. Both are fine; spec assumes that cadence. Verify no test data in `runs` would falsely trigger "first weekly digest after deploy is huge" (it picks the past 7 days regardless).
 
 ---
@@ -272,7 +272,7 @@ If you want to swap any of these, edit this section before starting Task 1.
 
 ### Task 6.1 — Push branch
 
-- [ ] `git push -u origin session-6`.
+- [ ] `git push -u origin session-7`.
 
 ### Task 6.2 — Apply migration
 
@@ -283,7 +283,7 @@ If you want to swap any of these, edit this section before starting Task 1.
 
 - [ ] On droplet:
   ```
-  cd /opt/personal-os-v2 && git fetch && git checkout session-6 && git pull && systemctl restart personal-os-v2 && sleep 3 && journalctl -u personal-os-v2 -n 30 --no-pager | grep -E "APScheduler|jobs:"
+  cd /opt/personal-os-v2 && git fetch && git checkout session-7 && git pull && systemctl restart personal-os-v2 && sleep 3 && journalctl -u personal-os-v2 -n 30 --no-pager | grep -E "APScheduler|jobs:"
   ```
 - [ ] Confirm five jobs registered: `cron_morning`, `cron_noon`, `cron_evening`, `cron_weekly`, `cron_monthly_rules`. Next-fire times should make sense (next Saturday 07:00 LA; next 1st-of-month 07:00 LA).
 
@@ -314,7 +314,7 @@ If you want to swap any of these, edit this section before starting Task 1.
 
 ### Task 7.1 — Update project CLAUDE.md
 
-- [ ] Bump "Current state" header to Session 6 shipped paragraph. Mention five cron jobs total, weekly digest + monthly rules + research-thread builder.
+- [ ] Bump "Current state" header to Session 7 shipped paragraph. Mention five cron jobs total, weekly digest + monthly rules + research-thread builder.
 - [ ] Update operator runbook with Saturday digest + monthly-1st rule pass routines.
 - [ ] Add new key invariants:
   - `lm_proposals` is the source of truth for what's been suggested/accepted/rejected; never delete rows (audit trail).
@@ -329,19 +329,19 @@ If you want to swap any of these, edit this section before starting Task 1.
 
 ### Task 7.3 — Fast-forward merge
 
-- [ ] `git checkout main && git merge --ff-only session-6 && git push origin main`.
+- [ ] `git checkout main && git merge --ff-only session-7 && git push origin main`.
 - [ ] On droplet: switch back to main, redeploy, confirm five jobs registered.
 
 ### Task 7.4 — Branch cleanup (optional)
 
-- [ ] `git branch -d session-6; git push origin --delete session-6` (PowerShell, sequential — no `&&`).
+- [ ] `git branch -d session-7; git push origin --delete session-7` (PowerShell, sequential — no `&&`).
 
 ---
 
 ## Rollback plan
 
-- **Disable Session 6 jobs only:** comment out the two new `add_job` calls in `bot/scheduler.py`, push, redeploy. Three daily jobs continue running.
-- **Disable everything Session 6 brought:** revert the session-6 merge commit on main, `git push`, redeploy. The `lm_proposals` table can stay (it's append-only, no effect on Session 5 paths).
+- **Disable Session 7 jobs only:** comment out the two new `add_job` calls in `bot/scheduler.py`, push, redeploy. Three daily jobs continue running.
+- **Disable everything Session 7 brought:** revert the session-7 merge commit on main, `git push`, redeploy. The `lm_proposals` table can stay (it's append-only, no effect on Session 5 paths).
 - **Roll back vault `_meta/rules.md` if a bad rule was appended:** vault file is hand-editable; just open in Obsidian and delete the line.
 
 ---
@@ -396,4 +396,4 @@ When the user taps Yes on a rule proposal, the bot appends the rule line to the 
 - **Cost report math for "projected $/mo".** Spec says "rolling 30-day spend + projected monthly." If we're mid-month, `30d × 12 / days_so_far` overprojects when usage was front-loaded. Simpler: just show the rolling 30d as the projected monthly. Defer the refinement.
 - **Sonnet system-prompt token budget.** A week of 200 items × ~50 tokens of summary each = ~10k tokens of input. Well within Sonnet's window. If it ever bites, summarize-then-summarize.
 - **Idempotent re-run.** If `_weekly_digest_cron` runs twice in the same hour (manual trigger + missed cron retry), we'd insert duplicate proposals. Likely fine for v1; pragmatic guard would be "skip if a `weekly-digest` run row already exists for this LA-week." Defer unless it bites.
-- **Edge case — first weekly digest after deploy.** If session-6 deploys on a Friday, Saturday's digest covers Saturday → Saturday. Result: a thin digest. Acceptable; recovers naturally.
+- **Edge case — first weekly digest after deploy.** If session-7 deploys on a Friday, Saturday's digest covers Saturday → Saturday. Result: a thin digest. Acceptable; recovers naturally.
