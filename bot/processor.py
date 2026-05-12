@@ -125,6 +125,33 @@ def _download_image_to_dropbox(
     dropbox_client.files_upload(f=content, path=dropbox_path, mode=WriteMode("overwrite"))
     return dropbox_path
 
+
+def _download_video_to_dropbox(
+    dropbox_client,
+    video_url: str,
+    item_id: str,
+    *,
+    vault_root: str,
+    project: str = "_inbox",
+) -> str:
+    """Download a video URL and upload to Dropbox inside the vault.
+
+    Files land at `<vault_root>/<project>/_attachments/<item_id>.mp4`.
+    Videos can be 10+ MB so timeout is generous compared to the image path.
+    The post-classify move step in `process_item` relocates the file once
+    the classifier picks a project.
+    """
+    from dropbox.files import WriteMode
+
+    with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+        resp = client.get(video_url)
+        resp.raise_for_status()
+        content = resp.content
+    dropbox_path = f"{vault_root}/{project}/_attachments/{item_id}.mp4"
+    dropbox_client.files_upload(f=content, path=dropbox_path, mode=WriteMode("overwrite"))
+    return dropbox_path
+
+
 logger = logging.getLogger(__name__)
 
 

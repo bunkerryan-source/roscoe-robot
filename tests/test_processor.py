@@ -1154,3 +1154,48 @@ def test_is_video_url_detects_known_extensions():
     assert _is_video_url("https://pbs.twimg.com/photo.jpg?name=large") is False
     assert _is_video_url("") is False
     assert _is_video_url(None) is False
+
+
+def test_download_video_to_dropbox_stages_with_mp4_extension(monkeypatch):
+    from bot import processor
+
+    captured = {}
+
+    class FakeDropbox:
+        def files_upload(self, *, f, path, mode):
+            captured["path"] = path
+            captured["bytes_len"] = len(f)
+
+    class FakeResponse:
+        content = b"FAKE_MP4_BYTES" * 100
+
+        def raise_for_status(self):
+            pass
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def get(self, url):
+            captured["fetched_url"] = url
+            return FakeResponse()
+
+    monkeypatch.setattr(processor.httpx, "Client", FakeClient)
+
+    path = processor._download_video_to_dropbox(
+        FakeDropbox(),
+        "https://video.twimg.com/clip.mp4",
+        item_id="item-abc",
+        vault_root="/personal-os",
+        project="_inbox",
+    )
+
+    assert path == "/personal-os/_inbox/_attachments/item-abc.mp4"
+    assert captured["fetched_url"] == "https://video.twimg.com/clip.mp4"
+    assert captured["bytes_len"] == len(b"FAKE_MP4_BYTES" * 100)
