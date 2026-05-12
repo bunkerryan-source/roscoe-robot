@@ -31,7 +31,9 @@ from bot.processor import run_batch
 from bot.scheduler import build_scheduler
 from bot.summary import build_evening_summary, build_morning_summary
 from bot.triage import (
+    PROJECTS,
     build_item_action_keyboard,
+    build_project_picker_keyboard,
     build_review_keyboard,
     parse_callback_data,
 )
@@ -305,7 +307,13 @@ async def _handle_triage_callback(
     if action == "todo":
         await _handle_mark_todo(payload, chat_id, message_id)
         return
-    # Refile branches (refile + setproj) land in D5.
+    if action == "refile":
+        await _handle_refile_prompt(payload, chat_id, message_id)
+        return
+    if action == "setproj":
+        item_id, _, new_project = payload.partition(":")
+        await _handle_set_project(item_id, new_project, chat_id, message_id)
+        return
 
 
 def _render_review_card(item: dict, position: int, total: int) -> str:
@@ -412,6 +420,47 @@ async def _handle_mark_todo(item_id: str, chat_id: int, message_id: int) -> None
         message_id,
         "\U0001F4DD Marked as todo. (Not filed to Todoist yet — add manually or re-/process.)",
     )
+
+
+async def _handle_refile_prompt(item_id: str, chat_id: int, message_id: int) -> None:
+    """Reply with the project picker — second tap completes the refile."""
+    await send_message(
+        chat_id,
+        message_id,
+        "Pick the right project:",
+        reply_markup=build_project_picker_keyboard(item_id),
+    )
+
+
+async def _handle_set_project(
+    item_id: str, new_project: str, chat_id: int, message_id: int
+) -> None:
+    """Apply the chosen project, flip status to processed, write correction."""
+    if new_project not in PROJECTS:
+        await send_message(chat_id, message_id, f"Unknown project: {new_project}")
+        return
+    item = await asyncio.to_thread(fetch_item, supabase, item_id)
+    if not item:
+        await send_message(chat_id, message_id, "Item not found.")
+        return
+    original_project = item.get("project")
+    await asyncio.to_thread(
+        update_item_fields,
+        supabase,
+        item_id,
+        project=new_project,
+        status="processed",
+    )
+    await asyncio.to_thread(
+        insert_correction,
+        supabase,
+        item_id=item_id,
+        correction_type="project",
+        original_value={"project": original_project},
+        corrected_value={"project": new_project},
+        note=None,
+    )
+    await send_message(chat_id, message_id, f"\U0001F4C2 Refiled to {new_project}.")
 
 
 async def _run_batch_and_reply(chat_id: int, reply_to: int) -> None:

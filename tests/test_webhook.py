@@ -353,6 +353,112 @@ def test_callback_mark_todo_sets_type_todo_and_writes_correction(client, mocker)
     assert "todo" in text.lower()
 
 
+def test_callback_refile_sends_project_picker_keyboard(client, mocker):
+    test_client, _ = client
+    send_mock = mocker.patch("bot.main.send_message")
+
+    response = test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 30,
+            "callback_query": {
+                "id": "cb-refile",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 300},
+                "data": "refile:item-r",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    send_mock.assert_called_once()
+    args, kwargs = send_mock.call_args
+    text = args[2]
+    assert "Pick" in text or "project" in text.lower()
+    kb = kwargs["reply_markup"]
+    flat = [b for row in kb["inline_keyboard"] for b in row]
+    callbacks = [b["callback_data"] for b in flat]
+    for project in ("acute", "abp", "lake-arrowhead", "church", "claude-build", "design", "personal"):
+        assert f"setproj:item-r:{project}" in callbacks
+
+
+def test_callback_setproj_updates_project_and_writes_correction(client, mocker):
+    test_client, mock_sb = client
+    _stub_fetch_item(mock_sb, {
+        "id": "item-r", "project": "claude-build", "type": "image",
+        "tags": [], "status": "needs_review",
+    })
+    send_mock = mocker.patch("bot.main.send_message")
+
+    test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 31,
+            "callback_query": {
+                "id": "cb-setproj",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 301},
+                "data": "setproj:item-r:design",
+            },
+        },
+    )
+
+    update_payload = mock_sb.table.return_value.update.call_args.args[0]
+    assert update_payload == {"project": "design", "status": "processed"}
+    insert_payload = mock_sb.table.return_value.insert.call_args.args[0]
+    assert insert_payload["correction_type"] == "project"
+    assert insert_payload["original_value"] == {"project": "claude-build"}
+    assert insert_payload["corrected_value"] == {"project": "design"}
+    text = send_mock.call_args.args[2]
+    assert "design" in text
+    assert "Refiled" in text
+
+
+def test_callback_setproj_rejects_unknown_project(client, mocker):
+    test_client, mock_sb = client
+    send_mock = mocker.patch("bot.main.send_message")
+
+    test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 32,
+            "callback_query": {
+                "id": "cb-bad",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 302},
+                "data": "setproj:item-r:not-a-project",
+            },
+        },
+    )
+
+    text = send_mock.call_args.args[2]
+    assert "Unknown" in text or "not-a-project" in text
+    mock_sb.table.return_value.update.assert_not_called()
+
+
+def test_callback_setproj_on_missing_item_says_not_found(client, mocker):
+    test_client, mock_sb = client
+    _stub_fetch_item(mock_sb, None)
+    send_mock = mocker.patch("bot.main.send_message")
+
+    test_client.post(
+        "/webhook/test_secret",
+        json={
+            "update_id": 33,
+            "callback_query": {
+                "id": "cb-miss",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 12345}, "message_id": 303},
+                "data": "setproj:gone:design",
+            },
+        },
+    )
+
+    text = send_mock.call_args.args[2]
+    assert "not found" in text.lower()
+    mock_sb.table.return_value.update.assert_not_called()
+
+
 def test_callback_keep_on_missing_item_says_not_found(client, mocker):
     test_client, mock_sb = client
     _stub_fetch_item(mock_sb, None)
