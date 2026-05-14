@@ -249,7 +249,7 @@ _PROJECT_KEYWORDS = {
 }
 
 _VISION_SKIP_MIN_CAPTION_LEN = 8
-NEEDS_REVIEW_THRESHOLD = 0.6
+NEEDS_REVIEW_THRESHOLD = 0.8
 
 
 def _caption_is_decisive(caption: str) -> bool:
