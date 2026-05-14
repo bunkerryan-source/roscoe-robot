@@ -455,6 +455,12 @@ def process_item(
         # Note: vision-call wiring is deferred to Phase B. For now we send
         # text-only and rely on the caption + scraped post text.
 
+        if payload and payload.startswith("[voice transcription failed:"):
+            error_text = payload[len("[voice transcription failed:"):].rstrip("]").strip()
+            out["classification"] = _transcription_failure_classification(error_text=error_text)
+            out["api_cost_cents"] = 0
+            out["error"] = error_text
+
         # Inject scraped post body into the classifier payload (never into raw_text).
         if scrape_info and scrape_info.get("post_text"):
             scraped_block = f"[scraped X post]\n{scrape_info['post_text']}"
@@ -697,6 +703,7 @@ def run_batch(
                 status=result["status"],
                 source_post_id=result.get("source_post_id"),
                 media_dropbox_path=result.get("media_dropbox_path"),
+                error=result.get("error"),
             )
         except Exception:
             logger.exception("update_classified failed for %s", item["id"])

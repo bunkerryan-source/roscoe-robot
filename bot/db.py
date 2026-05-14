@@ -55,6 +55,7 @@ def update_classified(
     status: str = "processed",
     source_post_id: str | None = None,
     media_dropbox_path: str | None = None,
+    error: str | None = None,
 ) -> None:
     payload = {
         "status": status,
@@ -75,6 +76,8 @@ def update_classified(
         payload["source_post_id"] = source_post_id
     if media_dropbox_path is not None:
         payload["media_dropbox_path"] = media_dropbox_path
+    if error is not None:
+        payload["error"] = error
     client.table("items").update(payload).eq("id", item_id).execute()
 
 
