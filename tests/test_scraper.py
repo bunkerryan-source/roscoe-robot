@@ -190,3 +190,45 @@ def test_fetch_tweet_orders_images_before_videos_in_mixed_post():
         "https://pbs.twimg.com/media/B.jpg",
         "https://video.twimg.com/clip.mp4",
     ]
+
+
+@respx.mock
+def test_fetch_tweet_records_video_duration_from_variants():
+    respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[{
+        "url": "https://x.com/user/status/123",
+        "text": "tutorial",
+        "author": {"username": "user", "name": "U"},
+        "createdAt": "2026-05-10T12:00:00.000Z",
+        "media": [{
+            "type": "video",
+            "media_url_https": "https://pbs.twimg.com/amplify_video_thumb/x/img/thumb.jpg",
+            "video_info": {
+                "duration_millis": 600000,
+                "variants": [
+                    {"content_type": "video/mp4", "bitrate": 832000,
+                     "url": "https://video.twimg.com/amplify_video/x/vid/720x720/hi.mp4"},
+                ],
+            },
+        }],
+    }]))
+    result = fetch_tweet("https://x.com/user/status/123", token="t", actor="xquik~x-tweet-scraper")
+    assert result.image_urls == ["https://video.twimg.com/amplify_video/x/vid/720x720/hi.mp4"]
+    assert result.video_durations == {
+        "https://video.twimg.com/amplify_video/x/vid/720x720/hi.mp4": 600000,
+    }
+
+
+@respx.mock
+def test_fetch_tweet_video_durations_empty_when_no_videos():
+    respx.post(APIFY_URL).mock(return_value=httpx.Response(200, json=[{
+        "url": "https://x.com/user/status/123",
+        "text": "two photos",
+        "author": {"username": "user", "name": "U"},
+        "createdAt": "2026-05-10T12:00:00.000Z",
+        "media": [
+            {"type": "photo", "media_url_https": "https://pbs.twimg.com/media/A.jpg"},
+            {"type": "photo", "media_url_https": "https://pbs.twimg.com/media/B.jpg"},
+        ],
+    }]))
+    result = fetch_tweet("https://x.com/user/status/123", token="t", actor="xquik~x-tweet-scraper")
+    assert result.video_durations == {}

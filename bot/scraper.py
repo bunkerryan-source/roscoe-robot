@@ -29,6 +29,7 @@ class ScrapeResult:
     image_urls: list[str] = field(default_factory=list)
     midjourney_params: dict[str, str] = field(default_factory=dict)
     raw_response: dict[str, Any] | None = None
+    video_durations: dict[str, int] = field(default_factory=dict)
 
 
 def fetch_tweet(url: str, *, token: str, actor: str, timeout: float = 60.0) -> ScrapeResult:
@@ -104,11 +105,15 @@ def _normalize(source_url: str, tweet: dict[str, Any]) -> ScrapeResult:
     # Videos and animated_gif entries: append video URL after photos so the
     # existing multi-image fan-out invariant ("image_urls[1:] are all images")
     # holds for pure-image tweets and mixed tweets order photos-first.
+    video_durations: dict[str, int] = {}
     for m in media:
         if m.get("type") in ("video", "animated_gif"):
             video_url = _extract_video_url(m)
             if video_url:
                 image_urls.append(video_url)
+                duration = (m.get("video_info") or {}).get("duration_millis")
+                if isinstance(duration, (int, float)) and duration > 0:
+                    video_durations[video_url] = int(duration)
     return ScrapeResult(
         source_url=source_url,
         post_text=text,
@@ -118,6 +123,7 @@ def _normalize(source_url: str, tweet: dict[str, Any]) -> ScrapeResult:
         image_urls=image_urls,
         midjourney_params=extract_params(text),
         raw_response=tweet,
+        video_durations=video_durations,
     )
 
 
