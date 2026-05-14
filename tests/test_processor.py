@@ -1474,3 +1474,122 @@ def test_tutorial_classification_tags_include_tutorial():
     )
 
     assert "tutorial" in result["tags"]
+
+
+# ---------------------------------------------------------------------------
+# Session 6b — Task 5: Phase-A routes long videos to the tutorial path
+# ---------------------------------------------------------------------------
+
+
+def test_process_item_routes_long_video_to_tutorial_path(mocker):
+    item = {
+        "id": "item-tut-1",
+        "source": "telegram",
+        "source_message_id": "100",
+        "media_type": "link",
+        "raw_text": "https://x.com/u/status/1\nYT tutorial on website building",
+        "media_dropbox_path": None,
+    }
+    mocker.patch(
+        "bot.processor.handle_x_url",
+        return_value={
+            "source_post_id": "sp-tut",
+            "image_urls": ["https://video.twimg.com/long.mp4"],
+            "post_text": "How to build a Next.js dashboard in 10 minutes",
+            "midjourney_params": {},
+            "video_durations": {"https://video.twimg.com/long.mp4": 600_000},  # 10 min
+        },
+    )
+    video_download = mocker.patch("bot.processor._download_video_to_dropbox")
+    image_download = mocker.patch("bot.processor._download_image_to_dropbox")
+    classify = mocker.patch("bot.processor.classify_item")  # MUST NOT be called
+    todoist = mocker.patch("bot.processor.create_todoist_task", return_value="todoist-id-99")
+    obsidian = mocker.patch("bot.processor.write_obsidian_note", return_value="claude-build/2026-05-14-watch-next-js.md")
+    move = mocker.patch("bot.processor.move_dropbox_media")  # MUST NOT be called (no media)
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={"claude-build": "1000005"},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+        supabase_client=MagicMock(),
+        apify_api_token="apify_token",
+        apify_tweet_scraper_actor="xquik~x-tweet-scraper",
+    )
+
+    assert result["error"] is None
+    assert result["status"] == "processed"
+    # No Dropbox writes.
+    video_download.assert_not_called()
+    image_download.assert_not_called()
+    move.assert_not_called()
+    # No Haiku call.
+    classify.assert_not_called()
+    # Hardcoded classification was used.
+    assert result["classification"]["project"] == "claude-build"
+    assert result["classification"]["type"] == "tutorial"
+    assert "Watch" in result["classification"]["summary"]
+    # Zero API cost on the route.
+    assert result["api_cost_cents"] == 0
+    # Obsidian note written under claude-build.
+    obsidian.assert_called_once()
+    assert obsidian.call_args.kwargs["classification"]["project"] == "claude-build"
+    assert obsidian.call_args.kwargs["media_dropbox_path"] is None
+    # Todoist task created in claude-build project.
+    todoist.assert_called_once()
+    assert todoist.call_args.kwargs["project_id"] == "1000005"
+    assert "Watch" in todoist.call_args.kwargs["content"]
+
+
+def test_process_item_short_video_still_takes_download_path(mocker):
+    # Regression guard: 30s videos must still hit the existing Session 6 download path.
+    item = {
+        "id": "item-shortvid-1",
+        "source": "telegram",
+        "source_message_id": "101",
+        "media_type": "link",
+        "raw_text": "https://x.com/u/status/2",
+        "media_dropbox_path": None,
+    }
+    mocker.patch(
+        "bot.processor.handle_x_url",
+        return_value={
+            "source_post_id": "sp-short",
+            "image_urls": ["https://video.twimg.com/short.mp4"],
+            "post_text": "quick clip",
+            "midjourney_params": {},
+            "video_durations": {"https://video.twimg.com/short.mp4": 30_000},  # 30 sec
+        },
+    )
+    video_download = mocker.patch(
+        "bot.processor._download_video_to_dropbox",
+        return_value="/personal-os/_inbox/_attachments/item-shortvid-1.mp4",
+    )
+    mocker.patch(
+        "bot.processor.classify_item",
+        return_value=_fake_classify_response("design", "video", ["motion"], "short motion clip"),
+    )
+    mocker.patch("bot.processor.write_obsidian_note", return_value="design/x.md")
+    mocker.patch("bot.processor.move_dropbox_media", side_effect=lambda dropbox_client, from_path, to_path: None)
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={"design": "111", "claude-build": "222"},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+        supabase_client=MagicMock(),
+        apify_api_token="apify_token",
+        apify_tweet_scraper_actor="xquik~x-tweet-scraper",
+    )
+
+    assert result["error"] is None
+    video_download.assert_called_once()
+    assert item["media_type"] == "video"  # existing behavior preserved
