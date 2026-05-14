@@ -266,8 +266,13 @@ def enrich_item(
             transcript = transcribe_voice(openai_api_key, audio_bytes, file_extension=".ogg")
             return f"[voice transcript]\n{transcript}", False
         except Exception as e:
-            logger.warning("voice transcription failed: %s", e)
-            return raw_text, False
+            # Surface the failure in the payload so downstream code can
+            # detect it instead of silently classifying an empty payload
+            # (which causes the classifier to hallucinate). process_item
+            # reads this marker and applies a hardcoded "needs_review"
+            # classification in Task 3.
+            logger.warning("voice transcription failed for item %s: %s", item.get("id"), e)
+            return f"[voice transcription failed: {e}]", False
 
     if media_type == "link":
         url = raw_text.strip()
