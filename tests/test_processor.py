@@ -1364,3 +1364,42 @@ def test_handle_x_url_cached_returns_empty_video_durations(mocker):
     assert result["video_durations"] == {}
     fetch_tweet_mock.assert_not_called()
     insert_mock.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _is_long_video
+# ---------------------------------------------------------------------------
+
+def test_is_long_video_returns_true_when_duration_exceeds_threshold():
+    from bot.processor import _is_long_video
+    durations = {"https://video.twimg.com/long.mp4": 90_000}  # 90 seconds
+    assert _is_long_video("https://video.twimg.com/long.mp4", durations) is True
+
+
+def test_is_long_video_returns_false_for_short_video():
+    from bot.processor import _is_long_video
+    durations = {"https://video.twimg.com/short.mp4": 30_000}  # 30 seconds
+    assert _is_long_video("https://video.twimg.com/short.mp4", durations) is False
+
+
+def test_is_long_video_returns_false_when_duration_unknown():
+    from bot.processor import _is_long_video
+    # No entry in durations dict — conservative default is False so we still
+    # download. Standard Twitter `video_info.variants` responses always carry
+    # duration_millis; the unknown-duration path is the rare media_url_https
+    # direct-mp4 fallback. TODO: add HEAD fallback if this bites in production.
+    assert _is_long_video("https://video.twimg.com/unknown.mp4", {}) is False
+
+
+def test_is_long_video_returns_false_for_non_video_url():
+    from bot.processor import _is_long_video
+    assert _is_long_video("https://pbs.twimg.com/media/A.jpg", {}) is False
+
+
+def test_is_long_video_threshold_is_exclusive_at_60_seconds():
+    from bot.processor import _is_long_video
+    # Exactly 60s = short (not long). 60s + 1ms = long.
+    short_durations = {"https://video.twimg.com/exact.mp4": 60_000}
+    long_durations = {"https://video.twimg.com/over.mp4": 60_001}
+    assert _is_long_video("https://video.twimg.com/exact.mp4", short_durations) is False
+    assert _is_long_video("https://video.twimg.com/over.mp4", long_durations) is True

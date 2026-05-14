@@ -49,6 +49,30 @@ def _is_video_url(url: str | None) -> bool:
     return any(path.lower().endswith(ext) for ext in _VIDEO_EXTENSIONS)
 
 
+LONG_VIDEO_THRESHOLD_MS = 60_000  # >1 minute → tutorial path, not design path
+
+
+def _is_long_video(url: str | None, video_durations: dict[str, int]) -> bool:
+    """Return True iff `url` is a known video and its duration exceeds the threshold.
+
+    Used to route long X tweet videos away from the Dropbox download path
+    (which OOM-kills the uvicorn process on 4K videos) and toward the
+    Obsidian + Todoist tutorial path. If `url` is not in `video_durations`
+    the duration is unknown — we conservatively return False so the existing
+    download path runs. Standard Twitter responses always include
+    `duration_millis` in `video_info.variants`, so the unknown-duration path
+    is the rare media_url_https direct-mp4 fallback.
+    TODO: add HEAD Content-Length fallback for the unknown-duration case if
+    OOMs recur in production.
+    """
+    if not _is_video_url(url):
+        return False
+    duration_ms = video_durations.get(url)
+    if duration_ms is None:
+        return False
+    return duration_ms > LONG_VIDEO_THRESHOLD_MS
+
+
 def extract_x_url(text: str | None) -> str | None:
     """Return the first X/Twitter URL in `text`, or None."""
     if not text:
