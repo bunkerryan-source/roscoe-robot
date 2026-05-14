@@ -76,6 +76,9 @@ def write_obsidian_note(
         # Filenames are UUIDs so basename collisions are not a concern.
         filename = media_dropbox_path.rsplit("/", 1)[-1]
         body_parts += ["", f"![[{filename}]]"]
+    if classification.get("type") == "tutorial" and classification.get("_tutorial_video_url"):
+        # Direct link to the X-hosted mp4 so the note is one click from watch.
+        body_parts += ["", "## Video", "", classification["_tutorial_video_url"]]
     note = "\n".join(body_parts).encode("utf-8")
 
     full_path = f"{vault_root}/{obsidian_path}"

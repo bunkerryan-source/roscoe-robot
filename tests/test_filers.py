@@ -199,6 +199,65 @@ def test_move_dropbox_media_calls_files_move_v2():
     assert result == "/personal-os/design/_attachments/img-9999.jpg"
 
 
+def test_write_obsidian_note_includes_tutorial_video_link():
+    from bot.filers import write_obsidian_note
+
+    dropbox_client = MagicMock()
+    classification = {
+        "project": "claude-build",
+        "type": "tutorial",
+        "summary": "Watch: how to build X",
+        "tags": ["tutorial"],
+        "confidence": 0.95,
+        "_tutorial_video_url": "https://video.twimg.com/clip.mp4",
+    }
+
+    path = write_obsidian_note(
+        dropbox_client=dropbox_client,
+        vault_root="/personal-os",
+        item_id="tut-1",
+        classification=classification,
+        raw_text="https://x.com/u/status/1\nYT tutorial",
+        media_dropbox_path=None,
+    )
+
+    assert path.startswith("claude-build/")
+    written = dropbox_client.files_upload.call_args.kwargs["f"].decode("utf-8")
+    # Video URL appears in the body so it's clickable in Obsidian.
+    assert "https://video.twimg.com/clip.mp4" in written
+    # Original raw text (with X URL) is preserved under "## Raw capture".
+    assert "https://x.com/u/status/1" in written
+    # No wiki-link embed since there's no media file in the vault.
+    assert "![[" not in written
+
+
+def test_write_obsidian_note_non_tutorial_omits_tutorial_video_link():
+    from bot.filers import write_obsidian_note
+
+    dropbox_client = MagicMock()
+    classification = {
+        "project": "design",
+        "type": "image",
+        "summary": "kitchen tile",
+        "tags": ["tile"],
+        "confidence": 0.9,
+        # No _tutorial_video_url for image items.
+    }
+
+    write_obsidian_note(
+        dropbox_client=dropbox_client,
+        vault_root="/personal-os",
+        item_id="img-1",
+        classification=classification,
+        raw_text="kitchen tile",
+        media_dropbox_path="/personal-os/design/_attachments/img-1.jpg",
+    )
+
+    written = dropbox_client.files_upload.call_args.kwargs["f"].decode("utf-8")
+    # Wiki-link embed for the image still works.
+    assert "![[img-1.jpg]]" in written
+
+
 def test_move_dropbox_media_propagates_errors():
     from dropbox.exceptions import ApiError
 
