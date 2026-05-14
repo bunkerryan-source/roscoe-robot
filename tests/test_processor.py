@@ -1750,3 +1750,83 @@ def test_transcription_failure_classification_truncates_long_error():
     long_error = "x" * 500
     result = _transcription_failure_classification(error_text=long_error)
     assert len(result["summary"]) <= _TRANSCRIPTION_ERROR_SUMMARY_MAX
+
+
+def test_process_item_voice_transcription_failure_routes_to_needs_review(mocker):
+    item = {
+        "id": "voice-fail-1",
+        "source": "telegram",
+        "source_message_id": "300",
+        "media_type": "voice",
+        "raw_text": None,
+        "media_dropbox_path": "/personal-os/_inbox/2026-05-14/voice-fail-1.ogg",
+    }
+    mocker.patch("bot.processor._download_dropbox_bytes", return_value=b"fake-ogg")
+    mocker.patch(
+        "bot.processor.transcribe_voice",
+        side_effect=RuntimeError("401 Unauthorized: Bearer token invalid"),
+    )
+    # classify_item MUST NOT be called — we use the hardcoded failure classification.
+    classify = mocker.patch("bot.processor.classify_item")
+    mocker.patch("bot.processor.write_obsidian_note", return_value="personal/v.md")
+    mocker.patch("bot.processor.move_dropbox_media", return_value=None)
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={"personal": "111"},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+    )
+
+    assert result["status"] == "needs_review"
+    assert result["error"] is not None
+    assert "401" in result["error"]
+    assert result["classification"]["type"] == "voice"
+    assert result["classification"]["confidence"] == 0.0
+    assert result["api_cost_cents"] == 0
+    classify.assert_not_called()
+
+
+def test_run_batch_persists_error_field_for_voice_failure(mocker):
+    # Regression guard: when a voice item lands in needs_review with an error,
+    # run_batch must propagate that error to the Supabase update so it shows
+    # up in items.error.
+    pending_items = [{
+        "id": "vfail-1",
+        "source": "telegram",
+        "source_message_id": "301",
+        "media_type": "voice",
+        "raw_text": None,
+        "media_dropbox_path": "/personal-os/_inbox/x.ogg",
+    }]
+    mocker.patch("bot.processor.fetch_pending_items", return_value=pending_items)
+    mocker.patch("bot.processor.fetch_recent_corrections", return_value=[])
+    mocker.patch("bot.processor.build_classifier_system_prompt", return_value=[{"type": "text", "text": "s"}])
+    mocker.patch("bot.processor._download_dropbox_bytes", return_value=b"x")
+    mocker.patch("bot.processor.transcribe_voice", side_effect=RuntimeError("whisper blew up"))
+    mocker.patch("bot.processor.write_obsidian_note", return_value="personal/v.md")
+    mocker.patch("bot.processor.move_dropbox_media", return_value=None)
+    mocker.patch("bot.processor.insert_run")
+    update = mocker.patch("bot.processor.update_classified")
+
+    run_batch(
+        supabase_client=MagicMock(),
+        anthropic_client=MagicMock(),
+        dropbox_client_factory=lambda: MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={"personal": "111"},
+        vault_root="/personal-os",
+        rules_md="",
+        tag_vocab_md="",
+    )
+
+    update.assert_called_once()
+    call_kwargs = update.call_args.kwargs
+    assert call_kwargs["status"] == "needs_review"
+    # The error text must be passed through to update_classified.
+    assert "whisper blew up" in (call_kwargs.get("error") or "")
