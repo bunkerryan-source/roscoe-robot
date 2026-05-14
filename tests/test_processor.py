@@ -1687,9 +1687,8 @@ def test_enrich_voice_returns_failure_marker_when_whisper_raises(mocker):
 
     payload, needs_vision = enrich_item(item, openai_api_key="x", dropbox_client=MagicMock())
 
-    # Marker payload identifies the failure mode so the classifier (or our
-    # hardcoded-failure route in process_item) has something deterministic to
-    # latch onto. Must NOT be empty/None — that's what causes hallucination.
+    # Payload must NOT be empty/None — an empty payload is what causes the
+    # classifier to hallucinate a summary from nothing.
     assert "voice transcription failed" in payload.lower()
     assert "401" in payload  # underlying exception text is surfaced
     assert needs_vision is False
