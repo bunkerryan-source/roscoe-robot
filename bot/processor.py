@@ -378,10 +378,28 @@ def process_item(
                     )
                     out["source_post_id"] = scrape_info["source_post_id"]
                     out["scrape_info"] = scrape_info
-                    # Download first image only if the item doesn't already carry user-uploaded media.
+                    # Phase A media dispatch. Three branches, in priority order:
+                    #   1. Long video (>60s) → tutorial path. Skip download
+                    #      entirely; pre-set classification so the rest of
+                    #      process_item writes Obsidian + Todoist normally.
+                    #   2. Short video → existing Session 6 download path.
+                    #   3. Image → existing image download path.
                     if scrape_info["image_urls"] and not item.get("media_dropbox_path"):
                         first_url = scrape_info["image_urls"][0]
-                        if _is_video_url(first_url):
+                        video_durations = scrape_info.get("video_durations") or {}
+                        if _is_long_video(first_url, video_durations):
+                            out["classification"] = _tutorial_classification(
+                                post_text=scrape_info.get("post_text") or "",
+                                x_url=x_url,
+                                video_url=first_url,
+                            )
+                            out["api_cost_cents"] = 0
+                            # Keep media_type as 'link' so enrich_item's link
+                            # branch runs (we still want OG fetch as a backup
+                            # source of context if the tweet text was empty).
+                            # No media path is set — the Obsidian writer
+                            # already handles media_dropbox_path=None.
+                        elif _is_video_url(first_url):
                             staged = _download_video_to_dropbox(
                                 dropbox_client, first_url, item["id"],
                                 vault_root=vault_root, project="_inbox",
@@ -423,9 +441,14 @@ def process_item(
                 f"or transcript — classify as best-guess from media_type]"
             )
 
-        classification = classify_item(anthropic_client, system_blocks, payload)
-        out["classification"] = classification
-        out["api_cost_cents"] = classification.get("_cost_cents", 0)
+        if out["classification"] is not None:
+            # Tutorial path (or any future hardcoded route) — classification
+            # is already set; skip the Haiku call entirely.
+            classification = out["classification"]
+        else:
+            classification = classify_item(anthropic_client, system_blocks, payload)
+            out["classification"] = classification
+            out["api_cost_cents"] = classification.get("_cost_cents", 0)
 
         # Phase B — second-pass vision for design+image items. Refines tags,
         # visual_subtype, and summary by actually looking at the image. Skipped
@@ -485,7 +508,7 @@ def process_item(
         )
         out["obsidian_path"] = obsidian_path
 
-        if classification.get("type") == "todo":
+        if classification.get("type") in ("todo", "tutorial"):
             project = classification.get("project") or "personal"
             project_id = todoist_projects.get(project)
             if project_id:
