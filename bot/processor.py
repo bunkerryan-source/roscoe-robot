@@ -73,6 +73,36 @@ def _is_long_video(url: str | None, video_durations: dict[str, int]) -> bool:
     return duration_ms > LONG_VIDEO_THRESHOLD_MS
 
 
+_TUTORIAL_SUMMARY_MAX = 200
+
+
+def _tutorial_classification(*, post_text: str, x_url: str, video_url: str) -> dict:
+    """Build the hardcoded classification dict for a long-video tutorial item.
+
+    Long-video X posts skip Haiku classification entirely. The classifier's
+    job (pick project, pick type, write summary) is deterministic here:
+    project is always claude-build, type is always tutorial, summary is a
+    watch-cue derived from the tweet text.
+    """
+    text = (post_text or "").strip()
+    if text:
+        snippet = text[:_TUTORIAL_SUMMARY_MAX - len("Watch: ")]
+        summary = f"Watch: {snippet}"
+    else:
+        summary = f"Watch tutorial at {x_url}"
+    return {
+        "project": "claude-build",
+        "subdomain": None,
+        "type": "tutorial",
+        "tags": ["tutorial", "x-video"],
+        "visual_subtype": None,
+        "summary": summary[:_TUTORIAL_SUMMARY_MAX],
+        "confidence": 0.95,
+        "_cost_cents": 0,
+        "_tutorial_video_url": video_url,  # for the Obsidian note body
+    }
+
+
 def extract_x_url(text: str | None) -> str | None:
     """Return the first X/Twitter URL in `text`, or None."""
     if not text:

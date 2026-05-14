@@ -1403,3 +1403,71 @@ def test_is_long_video_threshold_is_exclusive_at_60_seconds():
     long_durations = {"https://video.twimg.com/over.mp4": 60_001}
     assert _is_long_video("https://video.twimg.com/exact.mp4", short_durations) is False
     assert _is_long_video("https://video.twimg.com/over.mp4", long_durations) is True
+
+
+# ---------------------------------------------------------------------------
+# Session 6b — Task 4: _tutorial_classification helper
+# ---------------------------------------------------------------------------
+
+
+def test_tutorial_classification_uses_tweet_text_as_summary():
+    from bot.processor import _tutorial_classification
+
+    result = _tutorial_classification(
+        post_text="How to build a Next.js dashboard in 10 minutes",
+        x_url="https://x.com/u/status/1",
+        video_url="https://video.twimg.com/clip.mp4",
+    )
+
+    assert result["project"] == "claude-build"
+    assert result["type"] == "tutorial"
+    assert result["subdomain"] is None
+    assert result["visual_subtype"] is None
+    # confidence stays well above NEEDS_REVIEW_THRESHOLD (0.6) so the item
+    # bypasses triage — there's nothing to review on a hardcoded route.
+    assert result["confidence"] >= 0.95
+    # Free — no Haiku call.
+    assert result["_cost_cents"] == 0
+    # Summary is a watch-cue derived from the tweet text.
+    assert "Watch" in result["summary"]
+    assert "Next.js dashboard" in result["summary"]
+
+
+def test_tutorial_classification_truncates_long_tweet_text():
+    from bot.processor import _tutorial_classification
+
+    long_text = "x" * 500
+    result = _tutorial_classification(
+        post_text=long_text,
+        x_url="https://x.com/u/status/1",
+        video_url="https://video.twimg.com/clip.mp4",
+    )
+
+    # Summary must fit comfortably in a Todoist task title; cap at ~200 chars.
+    assert len(result["summary"]) <= 200
+
+
+def test_tutorial_classification_falls_back_when_tweet_text_empty():
+    from bot.processor import _tutorial_classification
+
+    result = _tutorial_classification(
+        post_text="",
+        x_url="https://x.com/u/status/1",
+        video_url="https://video.twimg.com/clip.mp4",
+    )
+
+    # Fallback should reference the source URL so the task is still actionable.
+    assert "https://x.com/u/status/1" in result["summary"]
+    assert "Watch" in result["summary"]
+
+
+def test_tutorial_classification_tags_include_tutorial():
+    from bot.processor import _tutorial_classification
+
+    result = _tutorial_classification(
+        post_text="something",
+        x_url="https://x.com/u/status/1",
+        video_url="https://video.twimg.com/clip.mp4",
+    )
+
+    assert "tutorial" in result["tags"]
