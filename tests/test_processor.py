@@ -1302,3 +1302,62 @@ def test_fan_out_skips_video_urls(mocker):
     # Ensure the .mp4 URL was never passed to the image helper, even by exception masking.
     all_call_urls = [c.args[1] for c in image_download.call_args_list]
     assert "https://video.twimg.com/clip.mp4" not in all_call_urls
+
+
+# ---------------------------------------------------------------------------
+# Session 6b — Task 2: handle_x_url surfaces video_durations
+# ---------------------------------------------------------------------------
+
+
+def test_handle_x_url_fresh_scrape_returns_video_durations(mocker):
+    from bot.processor import handle_x_url
+    from bot.scraper import ScrapeResult
+
+    mock_supabase = MagicMock()
+    mock_supabase.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+    mocker.patch("bot.processor.get_source_post_by_url", return_value=None)
+    mocker.patch(
+        "bot.processor.scraper.fetch_tweet",
+        return_value=ScrapeResult(
+            source_url="https://x.com/u/status/1",
+            post_text="long tutorial",
+            author_handle="@u",
+            author_name="U",
+            posted_at=None,
+            image_urls=["https://video.twimg.com/clip.mp4"],
+            video_durations={"https://video.twimg.com/clip.mp4": 600000},
+        ),
+    )
+    mocker.patch("bot.processor.insert_source_post", return_value="sp-new")
+
+    result = handle_x_url(
+        mock_supabase, "https://x.com/u/status/1",
+        token="t", actor="xquik~x-tweet-scraper",
+    )
+
+    assert result["source_post_id"] == "sp-new"
+    assert result["image_urls"] == ["https://video.twimg.com/clip.mp4"]
+    assert result["video_durations"] == {"https://video.twimg.com/clip.mp4": 600000}
+
+
+def test_handle_x_url_cached_returns_empty_video_durations(mocker):
+    from bot.processor import handle_x_url
+
+    mocker.patch(
+        "bot.processor.get_source_post_by_url",
+        return_value={
+            "id": "sp-cached",
+            "image_urls": ["https://pbs.twimg.com/A.jpg"],
+            "post_text": "cached",
+            "midjourney_params": {},
+        },
+    )
+
+    result = handle_x_url(
+        MagicMock(), "https://x.com/u/status/1",
+        token="t", actor="xquik~x-tweet-scraper",
+    )
+
+    assert result["source_post_id"] == "sp-cached"
+    # Cached path: no durations available (we don't persist them). Defaults to {}.
+    assert result["video_durations"] == {}
