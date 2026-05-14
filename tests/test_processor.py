@@ -1593,3 +1593,81 @@ def test_process_item_short_video_still_takes_download_path(mocker):
     assert result["error"] is None
     video_download.assert_called_once()
     assert item["media_type"] == "video"  # existing behavior preserved
+
+
+def test_process_item_creates_todoist_task_for_type_tutorial(mocker):
+    # Minimal item with the tutorial classification pre-set so we isolate the
+    # Todoist trigger condition. No X URL — no Phase-A scrape needed.
+    item = {
+        "id": "item-tut-todoist",
+        "source": "telegram",
+        "source_message_id": "200",
+        "media_type": "text",
+        "raw_text": "https://x.com/u/status/9 watch this later",
+        "media_dropbox_path": None,
+    }
+    mocker.patch(
+        "bot.processor.classify_item",
+        return_value={
+            "project": "claude-build",
+            "subdomain": None,
+            "type": "tutorial",
+            "tags": ["tutorial"],
+            "visual_subtype": None,
+            "summary": "Watch: how to build X",
+            "confidence": 0.95,
+            "_cost_cents": 0,
+        },
+    )
+    mocker.patch("bot.processor.write_obsidian_note", return_value="claude-build/x.md")
+    todoist = mocker.patch("bot.processor.create_todoist_task", return_value="td-1")
+
+    result = process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={"claude-build": "1000005"},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+    )
+
+    assert result["error"] is None
+    assert result["todoist_task_id"] == "td-1"
+    todoist.assert_called_once()
+    assert todoist.call_args.kwargs["project_id"] == "1000005"
+    assert todoist.call_args.kwargs["content"] == "Watch: how to build X"
+
+
+def test_process_item_does_not_create_todoist_for_type_image(mocker):
+    # Regression: existing types (image, idea, article, link, video) must NOT
+    # trigger Todoist. Only todo and tutorial do.
+    item = {
+        "id": "item-img",
+        "source": "telegram",
+        "source_message_id": "201",
+        "media_type": "image",
+        "raw_text": "lake arrowhead kitchen tile",
+        "media_dropbox_path": "/personal-os/_inbox/_attachments/item-img-0.jpg",
+    }
+    mocker.patch(
+        "bot.processor.classify_item",
+        return_value=_fake_classify_response("lake-arrowhead", "image", ["tile"], "kitchen tile"),
+    )
+    mocker.patch("bot.processor.write_obsidian_note", return_value="lake-arrowhead/x.md")
+    mocker.patch("bot.processor.move_dropbox_media", side_effect=lambda dropbox_client, from_path, to_path: None)
+    todoist = mocker.patch("bot.processor.create_todoist_task")
+
+    process_item(
+        item,
+        anthropic_client=MagicMock(),
+        dropbox_client=MagicMock(),
+        openai_api_key="x",
+        todoist_token="t",
+        todoist_projects={"lake-arrowhead": "111"},
+        vault_root="/personal-os",
+        system_blocks=[{"type": "text", "text": "s"}],
+    )
+
+    todoist.assert_not_called()
