@@ -1431,6 +1431,9 @@ def test_tutorial_classification_uses_tweet_text_as_summary():
     # Summary is a watch-cue derived from the tweet text.
     assert "Watch" in result["summary"]
     assert "Next.js dashboard" in result["summary"]
+    # _tutorial_video_url is consumed by the Obsidian writer (Task 7) to render
+    # a clickable Video section. Locked in here so a refactor catches a rename.
+    assert result["_tutorial_video_url"] == "https://video.twimg.com/clip.mp4"
 
 
 def test_tutorial_classification_truncates_long_tweet_text():
