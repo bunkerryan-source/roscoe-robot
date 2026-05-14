@@ -103,6 +103,30 @@ def _tutorial_classification(*, post_text: str, x_url: str, video_url: str) -> d
     }
 
 
+_TRANSCRIPTION_ERROR_SUMMARY_MAX = 250
+
+
+def _transcription_failure_classification(*, error_text: str) -> dict:
+    """Build a hardcoded classification for an item whose voice transcription failed.
+
+    Confidence is intentionally 0.0 so the existing
+    `confidence < NEEDS_REVIEW_THRESHOLD` check in process_item routes the
+    item into `needs_review`. The error text is surfaced in the summary so
+    Ryan can diagnose from the triage card without opening the journal.
+    """
+    summary = f"Voice transcription failed: {error_text}"[:_TRANSCRIPTION_ERROR_SUMMARY_MAX]
+    return {
+        "project": "personal",
+        "subdomain": None,
+        "type": "voice",
+        "tags": ["voice", "transcription-failed"],
+        "visual_subtype": None,
+        "summary": summary,
+        "confidence": 0.0,
+        "_cost_cents": 0,
+    }
+
+
 def extract_x_url(text: str | None) -> str | None:
     """Return the first X/Twitter URL in `text`, or None."""
     if not text:
