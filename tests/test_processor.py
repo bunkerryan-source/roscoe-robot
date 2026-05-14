@@ -1671,3 +1671,55 @@ def test_process_item_does_not_create_todoist_for_type_image(mocker):
     )
 
     todoist.assert_not_called()
+
+
+def test_enrich_voice_returns_failure_marker_when_whisper_raises(mocker):
+    item = {
+        "media_type": "voice",
+        "raw_text": None,
+        "media_dropbox_path": "/personal-os/_inbox/2026-05-14/v.ogg",
+    }
+    mocker.patch("bot.processor._download_dropbox_bytes", return_value=b"fake-ogg")
+    mocker.patch(
+        "bot.processor.transcribe_voice",
+        side_effect=RuntimeError("401 Unauthorized"),
+    )
+
+    payload, needs_vision = enrich_item(item, openai_api_key="x", dropbox_client=MagicMock())
+
+    # Marker payload identifies the failure mode so the classifier (or our
+    # hardcoded-failure route in process_item) has something deterministic to
+    # latch onto. Must NOT be empty/None — that's what causes hallucination.
+    assert "voice transcription failed" in payload.lower()
+    assert "401" in payload  # underlying exception text is surfaced
+    assert needs_vision is False
+
+
+def test_enrich_voice_returns_failure_marker_when_dropbox_download_raises(mocker):
+    item = {
+        "media_type": "voice",
+        "raw_text": None,
+        "media_dropbox_path": "/personal-os/_inbox/2026-05-14/v.ogg",
+    }
+    mocker.patch(
+        "bot.processor._download_dropbox_bytes",
+        side_effect=RuntimeError("path not found"),
+    )
+    # transcribe_voice should never be reached.
+    transcribe_mock = mocker.patch("bot.processor.transcribe_voice")
+
+    payload, needs_vision = enrich_item(item, openai_api_key="x", dropbox_client=MagicMock())
+
+    assert "voice transcription failed" in payload.lower()
+    assert "path not found" in payload
+    transcribe_mock.assert_not_called()
+
+
+def test_enrich_voice_with_no_media_path_returns_empty_marker():
+    # Edge case: voice item created but media_dropbox_path never populated
+    # (intake bug). Don't claim "transcription failed" because we never tried.
+    item = {"media_type": "voice", "raw_text": None, "media_dropbox_path": None}
+    payload, needs_vision = enrich_item(item, openai_api_key="x", dropbox_client=MagicMock())
+    # Falls back to raw_text (None → empty string when joined into payload elsewhere).
+    # The existing behavior here is correct — leave it alone.
+    assert payload is None or payload == ""
