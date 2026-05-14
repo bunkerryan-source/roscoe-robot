@@ -134,6 +134,64 @@ def test_update_classified_patches_all_classification_fields():
     mock_eq.assert_called_with("id", "abc")
 
 
+def test_update_classified_includes_error_when_provided():
+    mock_client = MagicMock()
+    mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [{"id": "vf-1"}]
+    classification = {
+        "project": "personal",
+        "subdomain": None,
+        "type": "voice",
+        "tags": ["voice", "transcription-failed"],
+        "visual_subtype": None,
+        "summary": "Voice transcription failed: 401",
+        "confidence": 0.0,
+    }
+
+    update_classified(
+        mock_client,
+        item_id="vf-1",
+        classification=classification,
+        obsidian_path="personal/v.md",
+        todoist_task_id=None,
+        api_cost_cents=0,
+        status="needs_review",
+        error="401 Unauthorized",
+    )
+
+    update_payload = mock_client.table.return_value.update.call_args.args[0]
+    assert update_payload["error"] == "401 Unauthorized"
+    assert update_payload["status"] == "needs_review"
+
+
+def test_update_classified_omits_error_when_not_provided():
+    # Regression guard: don't accidentally clear a previously-set error
+    # by writing error=None on the happy path.
+    mock_client = MagicMock()
+    mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [{"id": "img-1"}]
+    classification = {
+        "project": "design",
+        "subdomain": None,
+        "type": "image",
+        "tags": ["hero"],
+        "visual_subtype": None,
+        "summary": "hero banner",
+        "confidence": 0.9,
+    }
+
+    update_classified(
+        mock_client,
+        item_id="img-1",
+        classification=classification,
+        obsidian_path="design/x.md",
+        todoist_task_id=None,
+        api_cost_cents=2,
+        status="processed",
+    )
+
+    update_payload = mock_client.table.return_value.update.call_args.args[0]
+    assert "error" not in update_payload
+
+
 def test_insert_run_writes_summary_row():
     from datetime import datetime, timezone
 
