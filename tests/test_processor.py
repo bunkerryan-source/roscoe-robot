@@ -1423,7 +1423,7 @@ def test_tutorial_classification_uses_tweet_text_as_summary():
     assert result["type"] == "tutorial"
     assert result["subdomain"] is None
     assert result["visual_subtype"] is None
-    # confidence stays well above NEEDS_REVIEW_THRESHOLD (0.6) so the item
+    # confidence stays well above NEEDS_REVIEW_THRESHOLD so the item
     # bypasses triage — there's nothing to review on a hardcoded route.
     assert result["confidence"] >= 0.95
     # Free — no Haiku call.
