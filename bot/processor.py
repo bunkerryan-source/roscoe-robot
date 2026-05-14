@@ -67,6 +67,8 @@ def handle_x_url(supabase_client, url: str, *, token: str, actor: str) -> dict:
       - image_urls (list)
       - post_text (str)
       - midjourney_params (dict)
+      - video_durations (dict[str, int]) — URL → duration_millis. Empty for
+        cached returns since durations are not persisted to source_posts.
     Raises scraper.ScraperError on scrape failure (caller decides fallback).
     """
     existing = get_source_post_by_url(supabase_client, url)
@@ -76,6 +78,7 @@ def handle_x_url(supabase_client, url: str, *, token: str, actor: str) -> dict:
             "image_urls": existing.get("image_urls") or [],
             "post_text": existing.get("post_text") or "",
             "midjourney_params": existing.get("midjourney_params") or {},
+            "video_durations": {},
         }
     result = scraper.fetch_tweet(url, token=token, actor=actor)
     new_id = insert_source_post(
@@ -95,6 +98,7 @@ def handle_x_url(supabase_client, url: str, *, token: str, actor: str) -> dict:
         "image_urls": result.image_urls,
         "post_text": result.post_text,
         "midjourney_params": result.midjourney_params,
+        "video_durations": result.video_durations,
     }
 
 
