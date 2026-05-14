@@ -1725,12 +1725,14 @@ def test_enrich_voice_with_no_media_path_returns_empty_marker():
 
 
 def test_transcription_failure_classification_marks_needs_review():
-    from bot.processor import _transcription_failure_classification
+    from bot.processor import (
+        NEEDS_REVIEW_THRESHOLD,
+        _transcription_failure_classification,
+    )
 
     result = _transcription_failure_classification(error_text="401 Unauthorized")
 
-    # Confidence below NEEDS_REVIEW_THRESHOLD (0.6) so process_item routes to needs_review.
-    assert result["confidence"] < 0.6
+    assert result["confidence"] < NEEDS_REVIEW_THRESHOLD
     assert result["project"] == "personal"  # default bucket — Ryan refiles via triage
     assert result["type"] == "voice"
     assert result["_cost_cents"] == 0  # no Haiku call
@@ -1740,8 +1742,11 @@ def test_transcription_failure_classification_marks_needs_review():
 
 
 def test_transcription_failure_classification_truncates_long_error():
-    from bot.processor import _transcription_failure_classification
+    from bot.processor import (
+        _TRANSCRIPTION_ERROR_SUMMARY_MAX,
+        _transcription_failure_classification,
+    )
+
     long_error = "x" * 500
     result = _transcription_failure_classification(error_text=long_error)
-    # Summary must be reasonable length for the Obsidian frontmatter.
-    assert len(result["summary"]) <= 250
+    assert len(result["summary"]) <= _TRANSCRIPTION_ERROR_SUMMARY_MAX
